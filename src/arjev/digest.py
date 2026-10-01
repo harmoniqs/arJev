@@ -108,8 +108,12 @@ def run_digest(
                                  skipped_corpus=len(ranked.skipped_corpus))
         write_vault_note(note, digest_dir, today)
 
-    state_file = state_dir() / "papers-digest-state.json"
-    PostedState.load(state_file).append([p.arxiv for p in picks])
+    # posted ids are consumed only by DURABLE posts — a stdout preview must not
+    # mark picks as seen (the live integration run caught the opposite: a preview
+    # burned the day's picks and the real post would have shipped empty)
+    if post in ("slack", "vault"):
+        state_file = state_dir() / "papers-digest-state.json"
+        PostedState.load(state_file).append([p.arxiv for p in picks])
     write_journal(record)
 
     markdown = render_mrkdwn(picks, feed_name, total=len(items), today=today, mode=mode,

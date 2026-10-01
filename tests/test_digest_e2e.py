@@ -63,3 +63,19 @@ def test_corpus_papers_never_picked(monkeypatch, tmp_path):
     assert picked  # the fixture profile matches something
     corpus_ids = {"2601.01001", "2601.01002", "2601.01003", "2601.01004", "2601.01005", "2601.01006", "2601.01007"}
     assert not picked & corpus_ids
+
+
+def test_stdout_run_does_not_consume_posted_ids(monkeypatch, tmp_path):
+    """The live integration caught this: a --post stdout preview appended its picks
+    to the posted-state, so the real post the same day would have skipped them all."""
+    isolate_state(monkeypatch, tmp_path)
+    from arjev.rerank import state_dir
+    from arjev.state import PostedState
+
+    run_digest(digest_cfg(), feed_file=str(RSS), today=TODAY, seed="s", post="stdout")
+    state = PostedState.load(state_dir() / "papers-digest-state.json")
+    assert state.ids == [], "stdout previews must not consume posted ids"
+
+    run_digest(digest_cfg(), feed_file=str(RSS), today=TODAY, seed="s", post="vault")
+    state = PostedState.load(state_dir() / "papers-digest-state.json")
+    assert len(state.ids) == 5, "durable posts consume ids exactly once"

@@ -160,7 +160,7 @@ def test_labels_sync_end_to_end(monkeypatch, tmp_path):
     cfg.roots = [str(VAULT)]
     cfg.digest_dir = str(tmp_path / "digests")  # never write into the fixture vault
     result = run_digest(cfg, feed_file=str(Path(__file__).parent / "fixtures" / "rss-quant-ph.xml"),
-                        today=TODAY, seed="s")
+                        today=TODAY, seed="s", post="vault")
     assert result.picks, "the fixture vault + RSS produce picks"
     # posted ids landed in the state file (schema-identical)
     state = json.loads((state_dir() / "papers-digest-state.json").read_text())
