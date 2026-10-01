@@ -1,14 +1,18 @@
 """Ingest tests: BibTeX parsing, the PDF folder scan, the Slack seed (with the
-never-edit guard), and the multi-feed union with cross-listing dedupe."""
+never-edit guard), multi-feed union dedupe, and taste directives."""
 
 from datetime import date
 
 import yaml
 
 from arjev.config import Config
+from arjev.directives import Directives, parse_directives
 from arjev.feed import load_feeds
+from arjev.fold import fold_roots
 from arjev.ingest import ingest_bibtex, ingest_pdf_dir, ingest_slack_channel
+from arjev.jev import assemble_state
 from arjev.keep import KeepCandidate, scaffold_note
+from arjev.profile import DIRECTIVE_WEIGHT, build_profile
 from conftest import FIXTURES
 
 TODAY_D = date(2026, 10, 1)
@@ -135,3 +139,78 @@ def test_multi_feed_union_dedupes_crosslistings():
 def test_multi_feed_union_preserves_order():
     items = load_feeds([], feed_files=[str(FIXTURES / "rss-quant-ph.xml")])
     assert len(items) == 6
+
+
+# ── taste directives: authored intent outranks everything ───────────────────────
+
+DIRECTIVES_MD = """---
+type: directives
+labs: [Manchester]
+companies: [QuEra, IBM, Alice & Bob]
+topics: [optimal control, calibration, hardware error rates]
+---
+We want control and optimization papers a la the Manchester group, and the best
+experimental papers in every modality. QEC interests us when tied to hardware.
+"""
+
+
+def test_directives_parse_lists_and_body():
+    d = parse_directives(DIRECTIVES_MD)
+    assert d.labs == ["Manchester"]
+    assert "QuEra" in d.companies
+    assert "optimal control" in d.topics
+    assert "Manchester group" in d.body
+
+
+
+
+def test_directive_terms_outrank_tags_and_never_decay(tmp_path):
+    """Authored intent: weight above tags, immune to the 180-day decay."""
+    cfg = Config()
+    cfg.roots = [str(tmp_path / "vault")]
+    (tmp_path / "vault").mkdir()
+    (tmp_path / "vault" / "papers").mkdir()
+    (tmp_path / "vault" / "papers" / "p.md").write_text(
+        '---\ntype: paper\narxiv: "2601.01001"\ntags: [optimal-control-tag]\nwhy: "x"\n---\nbody'
+    )
+    directives = Directives(
+        body="control papers",
+        labs=["Manchester"],
+        companies=["QuEra"],
+        topics=["optimal control"],
+    )
+    profile = build_profile(fold_roots(cfg.expanded_roots, cfg), cfg, TODAY_D, directives=directives)
+    assert profile.terms["optimal control"] == DIRECTIVE_WEIGHT
+    assert profile.terms["quera"] == DIRECTIVE_WEIGHT
+    # above a single tag bump (TAG_WEIGHT=3.0 × decay)
+    assert profile.terms["optimal control"] > profile.terms["optimal-control-tag"]
+    assert profile.directives_body.startswith("control papers")
+
+
+def test_directives_body_rides_first_in_jev_state(tmp_path):
+    cfg = Config()
+    cfg.roots = [str(tmp_path / "vault")]
+    (tmp_path / "vault").mkdir()
+    (tmp_path / "vault" / "papers").mkdir()
+    (tmp_path / "vault" / "papers" / "p.md").write_text(
+        '---\ntype: paper\narxiv: "2601.01001"\ntags: [qec]\nwhy: "old signal"\n---\nbody'
+    )
+    directives = Directives(body="WE WANT MANCHESTER CONTROL PAPERS", topics=["optimal control"])
+    profile = build_profile(fold_roots(cfg.expanded_roots, cfg), cfg, TODAY_D, directives=directives)
+    from arjev.feed import FeedItem
+    from arjev.score import score_item
+
+    candidate = score_item(FeedItem(arxiv="2601.09999", title="t", abstract="a"), profile)
+    state = assemble_state(profile, candidate).state
+    taste = state["researcher_taste"]
+    assert taste["directives"] == "WE WANT MANCHESTER CONTROL PAPERS"
+    assert "directives" in str(list(taste.keys()))
+
+
+def test_unrelated_note_at_the_path_is_ignored():
+    d = parse_directives("just a random file with no frontmatter")
+    assert not d.labs and not d.companies and not d.topics
+    # body-only text IS present (a bare prose directives file is legal), but a
+    # note with a different type: field is ignored entirely
+    typed = parse_directives("---\ntype: digest\n---\nsome daily note")
+    assert not typed.present

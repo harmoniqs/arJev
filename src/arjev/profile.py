@@ -20,6 +20,7 @@ from datetime import date
 from .fold import FoldResult, PaperNote
 
 TAG_WEIGHT = 3.0
+DIRECTIVE_WEIGHT = 5.0  # authored intent outranks every derived signal
 BODY_WEIGHT = 1.0
 STOPWORDS = {
     "the", "and", "for", "with", "that", "this", "from", "are", "was", "were", "has", "have",
@@ -74,6 +75,7 @@ class Profile:
     recent_titles: list[str] = field(default_factory=list)
     note_count: int = 0
     degraded: bool = True
+    directives_body: str = ""  # authored taste — rides first-class into the Jev state
 
     def weight(self, term: str) -> float:
         return self.terms.get(term.lower().strip(), 0.0)
@@ -85,9 +87,20 @@ def _bump(profile: Profile, term: str, weight: float, mult: float, cfg) -> None:
         profile.terms[t] = profile.terms.get(t, 0.0) + weight * mult
 
 
-def build_profile(fold: FoldResult, cfg, now: date) -> Profile:
+def build_profile(fold: FoldResult, cfg, now: date, directives=None) -> Profile:
     """The lab's demonstrated taste. An untouched staged note contributes nothing."""
     profile = Profile()
+    from .directives import load_directives
+
+    directives = directives if directives is not None else load_directives(cfg)
+    if directives.present:
+        profile.directives_body = directives.body
+        # authored intent: high weight, NO recency decay — taste you wrote down
+        # does not age the way a note you read once does
+        for term in directives.all_terms():
+            t = term.lower().strip()
+            if t:
+                profile.terms[t] = profile.terms.get(t, 0.0) + DIRECTIVE_WEIGHT
     contributing = [p for p in fold.papers if p.contributes_taste]
     profile.note_count = len(fold.papers)
     profile.degraded = len(fold.papers) < DEGRADED_MIN_NOTES or not any(p.why for p in contributing)

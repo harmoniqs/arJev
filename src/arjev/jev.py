@@ -220,9 +220,10 @@ def assemble_state(profile: Profile, candidate, now=None) -> StateAssembly:
     whys = [(d, w[:WHY_CAP]) for d, w in profile.why_lines]
     titles = profile.recent_titles[:TOP_TITLES]
 
-    def build(term_count: int, why_count: int) -> dict:
+    def build(term_count: int, why_count: int, body_cap: int = 800) -> dict:
         return {
             "researcher_taste": {
+                "directives": (profile.directives_body[:body_cap] if profile.directives_body else None),
                 "terms": {t: round(w, 2) for t, w in terms[:term_count]},
                 "why_lines": [w for _, w in whys[:why_count]],
                 "recent_titles": titles,
