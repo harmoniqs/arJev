@@ -42,6 +42,11 @@ def main(argv: list[str] | None = None) -> int:
     p_labels_sync = p_labels_sub.add_parser("sync", help="vault-arrival join + checkbox harvest")
     p_labels_sync.add_argument("--config", default=None)
 
+    p_slack = sub.add_parser("slack", help="Slack surface operations")
+    p_slack_sub = p_slack.add_subparsers(dest="slack_cmd", required=True)
+    p_slack_sync = p_slack_sub.add_parser("sync", help="harvest reactions/replies → labels; auto-scaffold keeps")
+    p_slack_sync.add_argument("--config", default=None)
+
     args = parser.parse_args(argv)
     if args.cmd == "init":
         from .init import init_config
@@ -102,6 +107,44 @@ def main(argv: list[str] | None = None) -> int:
         ledger = LabelLedger()
         new = labels_sync(cfg, fold_roots(cfg.expanded_roots, cfg), ledger, now=datetime.now())
         print(f"{len(new)} new label rows; ledger holds {len(ledger.rows())}")
+        return 0
+    if args.cmd == "slack" and args.slack_cmd == "sync":
+        import json
+        from datetime import date
+
+        from arjev.config import load_config
+        from arjev.digest import slack_token
+        from arjev.keep import scaffold_note
+        from arjev.ledger import LabelLedger, now_ts
+        from arjev.rerank import journal_path
+        from arjev.slack import SlackClient, harvest_labels
+
+        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        if not cfg.slack_channel:
+            print("slack_channel not configured (docs/slack-setup.md)", file=sys.stderr)
+            return 1
+        journal = [json.loads(line) for line in journal_path().read_text().splitlines() if line.strip()]
+        posted = [
+            {"arxiv": c["arxiv"], "slack_ts": c["slack_ts"]}
+            for line in journal if line.get("slack_channel") == cfg.slack_channel
+            for c in line.get("candidates", []) if c.get("slack_ts")
+        ]
+        labels, _, _ = harvest_labels(
+            SlackClient(token=slack_token()), cfg.slack_channel, posted,
+            set(cfg.slack_keepers), cfg.emoji_map, now_ts(),
+        )
+        ledger = LabelLedger()
+        written = [label for label in labels if ledger.append(label)]
+        scaffolded = 0
+        for label in written:
+            if label.label_type != "keep":
+                continue
+            candidate = _candidate_from_journal(label.arxiv_id, journal_path())
+            if candidate is None:
+                continue
+            scaffold_note(candidate, cfg, date.today())
+            scaffolded += 1
+        print(f"{len(written)} labels written; {scaffolded} keep stubs scaffolded")
         return 0
     parser.error(f"unknown command {args.cmd!r}")
     return 2

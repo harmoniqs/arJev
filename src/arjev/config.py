@@ -40,6 +40,10 @@ class Config:
     papers_dir: str | None = None
     note_template: str | None = None
     jev_min_confidence: float = 0.6
+    slack_channel: str | None = None
+    slack_keepers: list[str] = field(default_factory=list)
+    why_style: str = "terms"  # terms | opaque | none
+    emoji_map: dict[str, str] = field(default_factory=lambda: {"thumbsup": "keep", "eyes": "read-later", "x": "skip"})
 
     @property
     def expanded_roots(self) -> list[Path]:
@@ -73,9 +77,14 @@ def load_config(path: Path | None = None) -> Config:
     for key in ("top", "screen", "probe_k"):
         setattr(cfg, key, int(raw.get(key, getattr(cfg, key))))
     cfg.feeds = list(raw.get("feeds", cfg.feeds))
-    cfg.digest_dir = raw.get("digest_dir")
-    cfg.library_dir = raw.get("library_dir")
-    cfg.papers_dir = raw.get("papers_dir")
-    cfg.note_template = raw.get("note_template")
+    for key in ("digest_dir", "library_dir", "papers_dir", "note_template"):
+        # TOML: keys written after [vault] belong to that table — accept both placements
+        setattr(cfg, key, raw.get(key) or vault.get(key))
     cfg.jev_min_confidence = float(raw.get("jev", {}).get("min_confidence", cfg.jev_min_confidence))
+    slack = raw.get("slack", {})
+    cfg.slack_channel = slack.get("channel")
+    cfg.slack_keepers = list(slack.get("keepers", []))
+    cfg.why_style = slack.get("why_style", cfg.why_style)
+    if "emoji_map" in slack:
+        cfg.emoji_map = dict(slack["emoji_map"])
     return cfg

@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "message": {
+    "ts": "1789990001.000100",
+    "reactions": [
+      {"name": "thumbsup", "users": ["U0000000SYN", "U0000000KEPR"]},
+      {"name": "eyes", "users": ["U0000000SYN"]},
+      {"name": "x", "users": ["U0000000RAND"]},
+      {"name": "fire", "users": ["U0000000SYN"]}
+    ]
+  }
+}

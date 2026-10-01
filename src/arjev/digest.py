@@ -1,12 +1,13 @@
 """Digest orchestration: fold → profile → feed → score → rank → Jev middle layer →
-render + journal. Deterministic on identical inputs (acceptance: fingerprint
-mismatches == 0). Fail-open: no key / outage / low confidence → the lexical ranking,
-with the mode flag and per-candidate journal saying exactly what ran."""
+post (stdout | vault | slack) + journal. Deterministic on identical inputs (acceptance:
+fingerprint mismatches == 0). Fail-open: no key / outage / low confidence → the lexical
+ranking, with the mode flag and per-candidate journal saying exactly what ran."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -36,6 +37,13 @@ def fingerprint_picks(picks: list[Pick]) -> str:
     return hashlib.sha256(json.dumps(canonical_picks(picks), sort_keys=True).encode()).hexdigest()[:16]
 
 
+def slack_token() -> str:
+    token = os.environ.get("ARJEV_SLACK_TOKEN")
+    if not token:
+        raise SystemExit("ARJEV_SLACK_TOKEN not set (docs/slack-setup.md)")
+    return token
+
+
 def run_digest(
     cfg: Config,
     feed: str | None = None,
@@ -44,6 +52,7 @@ def run_digest(
     today: date | None = None,
     seed: str | None = None,
     jev_client: JevClient | None = None,
+    slack_client=None,
 ) -> DigestResult:
     today = today or date.today()
     seed = seed or f"{feed or feed_file or 'quant-ph'}:{today.isoformat()}"
@@ -68,8 +77,7 @@ def run_digest(
         write_run_receipts(receipts)
     mode = mode_line(mode_primary, profile_flag(profile))
     feed_name = feed or (Path(feed_file).stem if feed_file else cfg.feeds[0])
-    markdown = render_mrkdwn(picks, feed_name, total=len(items), today=today, mode=mode,
-                              skipped_corpus=len(ranked.skipped_corpus))
+
     record = RunRecord(
         run_id=run_id,
         ts=datetime.now(UTC).isoformat(timespec="seconds"),
@@ -78,14 +86,34 @@ def run_digest(
         seed=seed,
         candidates=candidates,
     )
-    write_journal(record)
-    state_file = state_dir() / "papers-digest-state.json"
-    PostedState.load(state_file).append([p.arxiv for p in picks])
+
+    if post == "slack":
+        if not cfg.slack_channel:
+            raise SystemExit("slack_channel not configured (docs/slack-setup.md)")
+        from .slack import SlackClient, render_pick_message
+
+        sc = slack_client or SlackClient(token=slack_token())
+        record.slack_channel = cfg.slack_channel
+        for i, p in enumerate(picks):
+            msg = render_pick_message(p, i + 1, len(picks), today, feed_name, mode, cfg.why_style)
+            ts = sc.post_message(cfg.slack_channel, msg.text)
+            for c in record.candidates:
+                if c.arxiv == p.arxiv:
+                    c.slack_ts = ts
+                    break
+
     if post == "vault":
         digest_dir = Path(cfg.digest_dir).expanduser() if cfg.digest_dir else cfg.expanded_roots[0] / "digests"
         note = render_vault_note(picks, feed_name, total=len(items), today=today, mode=mode,
                                  skipped_corpus=len(ranked.skipped_corpus))
         write_vault_note(note, digest_dir, today)
+
+    state_file = state_dir() / "papers-digest-state.json"
+    PostedState.load(state_file).append([p.arxiv for p in picks])
+    write_journal(record)
+
+    markdown = render_mrkdwn(picks, feed_name, total=len(items), today=today, mode=mode,
+                              skipped_corpus=len(ranked.skipped_corpus))
     return DigestResult(
         markdown=markdown,
         fingerprint=fingerprint_picks(picks),
