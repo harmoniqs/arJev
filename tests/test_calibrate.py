@@ -207,3 +207,19 @@ def test_cli_calibrate_json_smoke(tmp_path, capsys, monkeypatch):
     out = capsys.readouterr().out
     parsed = json.loads(out)
     assert set(parsed["metrics"]) >= {"brier", "reliability", "precision_at_5", "probe_lift"}
+
+
+def test_probe_lift_is_na_with_reason_in_jev_first(tmp_path):
+    """The ranking amendment: in jev-first windows there is no probe — the metric
+    reports n/a with its reason, not a misleading zero."""
+    _monkey(tmp_path)
+    journal = [
+        _journal([_cand("2601.01011")], ts=TODAY_S),
+    ]
+    journal[0]["ranking"] = "jev-first"
+    _write_state(tmp_path, [], journal)
+    report = _calibrate(tmp_path)
+    lift = report.metrics["probe_lift"]
+    assert lift["mode"] == "jev-first"
+    assert "n/a" in lift["note"] and "jev-first" in lift["note"]
+    assert not any("probe is unmeasured" in r for r in report.recommendations)

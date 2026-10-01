@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     p_digest = sub.add_parser("digest", help="run the daily digest")
     p_digest.add_argument("--feed", default=None, help="arXiv RSS feed name (default: config feeds[0])")
     p_digest.add_argument("--feed-file", default=None, help="RSS fixture path (overrides --feed)")
-    p_digest.add_argument("--post", default="stdout", choices=["stdout", "vault"], help="output sink")
+    p_digest.add_argument("--post", default="stdout", choices=["stdout", "vault", "slack"], help="output sink")
     p_digest.add_argument("--config", default=None, help="config path")
     p_digest.add_argument("--top", type=int, default=None)
     p_digest.add_argument("--screen", type=int, default=None)

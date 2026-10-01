@@ -49,6 +49,7 @@ class RunRecord:
     seed: str
     candidates: list[CandidateJournal]
     slack_channel: str | None = None
+    ranking: str = "lexical-first"
 
     def to_json(self) -> str:
         return json.dumps(
@@ -60,6 +61,7 @@ class RunRecord:
                 "seed": self.seed,
                 "candidates": [c.__dict__ for c in self.candidates],
                 "slack_channel": self.slack_channel,
+                "ranking": self.ranking,
             },
             sort_keys=True,
         )
@@ -78,6 +80,75 @@ def run_id_for(seed: str, today: date) -> str:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     digest = hashlib.sha256(f"{seed}:{today.isoformat()}:{stamp}".encode()).hexdigest()[:6]
     return f"{stamp}-{digest}"
+
+
+def apply_jev_first(
+    items: list,
+    scored_by_id: dict,
+    skip_ids: set,
+    client: JevClient,
+    profile,
+    run_id: str,
+    receipts: list[JevReceipt],
+    top: int,
+    pace_s: float = 0.05,
+) -> tuple[list[Pick], str, list[CandidateJournal]]:
+    """The ranking amendment: Jev at the front line. Every eligible item (not corpus,
+    not posted) is Jev-scored; picks rank by top-two-level mass with lexical tiebreak.
+    Per-item fail-open falls to the lexical order; the probe is moot (nothing
+    unscreened). Pools stay in the journal as lexical classifications."""
+    import time as _time
+
+    mode_primary = "lexical-only"
+    evaluated: list[Pick] = []
+    jev_of: dict[str, float] = {}
+    fail_reasons: dict[str, str] = {}
+    for item in items:
+        arxiv = item.arxiv
+        if arxiv in skip_ids:
+            continue
+        s = scored_by_id.get(arxiv)
+        if s is None:
+            continue
+        assembly = assemble_state(profile, s)
+        if assembly.state is None:
+            fail_reasons[arxiv] = "state-overflow"
+            evaluated.append(Pick(arxiv, item.title, s.score, s.terms, 0.0, None, "state-overflow"))
+            continue
+        answer = client.score_relevance(assembly.state, arxiv, run_id, receipts)
+        if pace_s and assembly is not None:
+            _time.sleep(pace_s)
+        if answer.ok:
+            mode_primary = "jev"
+            mass = answer.distribution.get("must-read", 0.0) + answer.distribution.get("worth-reading", 0.0)
+            jev_of[arxiv] = mass
+            evaluated.append(Pick(arxiv, item.title, s.score, s.terms, mass, None, None))
+        else:
+            fail_reasons[arxiv] = answer.fail_reason
+            evaluated.append(Pick(arxiv, item.title, s.score, s.terms, 0.0, None, answer.fail_reason))
+    evaluated.sort(key=lambda p: (-p.jev_primary, -p.lexical_score, p.arxiv))
+    picks = evaluated[:top]
+    picked_ids = {p.arxiv for p in picks}
+    # lexical pool labels stay in the journal as calibration denominators
+    candidates = [
+        CandidateJournal(
+            arxiv=p.arxiv, pool=_lexical_pool(p.arxiv, scored_by_id), lexical_score=p.lexical_score,
+            terms=p.terms, jev=_jev_row_from_receipt(
+                next((r for r in receipts if r.candidate_arxiv == p.arxiv), None), fail_reasons.get(p.arxiv)),
+            posted=p.arxiv in picked_ids, rescued=None, title=p.title, authors=[],
+        )
+        for p in evaluated
+    ]
+    return picks, mode_primary, candidates
+
+
+def _lexical_pool(arxiv: str, scored_by_id: dict) -> str:
+    s = scored_by_id.get(arxiv)
+    if s is None:
+        return "none"
+    if s.score > 0:
+        return "survivor" if len(s.terms) > 1 else "near-miss"
+    return "probe"
 
 
 def apply_jev(rank: RankResult, client: JevClient, profile, run_id: str, receipts: list[JevReceipt],
