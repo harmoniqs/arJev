@@ -1,0 +1,22 @@
+# runtime state — never commit (arjev writes these under XDG state, mirrored here defensively)
+state/
+*.jsonl
+receipts/
+ledger/
+journal/
+
+# secrets
+.env
+*key*
+*token*
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+.ruff_cache/
+.pytest_cache/
+.coverage
