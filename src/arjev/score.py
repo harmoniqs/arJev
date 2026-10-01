@@ -32,7 +32,7 @@ def score_item(item: FeedItem, profile: Profile) -> ScoredItem:
     abstract = item.abstract.lower()
     score = 0.0
     terms: list[str] = []
-    for term, weight in profile.terms.items():
+    for term, weight in sorted(profile.terms.items(), key=lambda kv: -kv[1]):
         in_title = _count_matches(title, term)
         in_abstract = _count_matches(abstract, term)
         if in_title + in_abstract == 0:
