@@ -28,6 +28,17 @@ STOPWORDS = {
     "two", "can", "may", "also", "more", "most", "other", "paper", "note", "using", "based",
     "synthetic", "benchmark", "abstract", "summary", "citation", "exercise", "exercises",
     "fixture", "deliberately",  # fixture hygiene: never let fixture scaffolding become taste
+    # academic filler (the real-vault dry-run showed these riding into every why-line)
+    "via", "while", "all", "when", "just", "must", "both", "each", "give", "gives", "new",
+    "any", "many", "only", "how", "use", "way", "here", "still", "first", "type", "study",
+    "provides", "shows", "show", "including", "among", "even", "within", "important",
+    "requires", "require", "general", "complete", "method", "methods", "approach",
+    "approaches", "results", "result", "existing", "setting", "natural", "standard",
+    "previous", "work", "time", "length", "small", "large", "high", "low", "number",
+    "numbers", "order", "key", "makes", "make", "tools", "address", "space",
+    "present", "turn", "run", "against", "across", "during", "longer", "family", "sets",
+    "ability", "side", "probability", "scheme", "manner", "after", "version", "measured",
+    "matching", "property", "properties", "analogue",
 }
 DEGRADED_MIN_NOTES = 5
 
