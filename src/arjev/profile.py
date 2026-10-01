@@ -13,10 +13,11 @@ Signals per contributing note (spec: tags · why-lines · body terms · wikilink
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 
-from .fold import FoldResult
+from .fold import FoldResult, PaperNote
 
 TAG_WEIGHT = 3.0
 BODY_WEIGHT = 1.0
@@ -36,6 +37,14 @@ def _decay(read_date: date | None, now: date, half_life_days: float) -> float:
         return 1.0
     days = max(0.0, (now - read_date).days)
     return 0.5 ** (days / half_life_days)
+
+
+_CITATION_LINE = re.compile(r"^(\[?\d+\]?|arxiv:|doi:|http|nat\.|nature|phys\.|science|\*|\||#)", re.IGNORECASE)
+
+
+def _clean_body(body: str) -> str:
+    """Citation lines, URLs, and header markers are scaffolding, not taste."""
+    return "\n".join(line for line in body.splitlines() if not _CITATION_LINE.match(line.strip()))
 
 
 def _tokens(text: str) -> list[str]:
@@ -71,20 +80,43 @@ def build_profile(fold: FoldResult, cfg, now: date) -> Profile:
     contributing = [p for p in fold.papers if p.contributes_taste]
     profile.note_count = len(fold.papers)
     profile.degraded = len(fold.papers) < DEGRADED_MIN_NOTES or not any(p.why for p in contributing)
+    body_sourced: dict[str, float] = {}
     for note in contributing:
         mult = _decay(note.read_date, now, cfg.half_life_days) * (1 + 0.5 * min(3, note.inlinks))
         for tag in note.tags:
             _bump(profile, tag, TAG_WEIGHT, mult, cfg)
-        for tok in _tokens(note.title):
+        for tok in _tokens(note.title) + _tokens(_clean_body(note.body)):
             _bump(profile, tok, BODY_WEIGHT, mult, cfg)
-        for tok in _tokens(note.body):
-            _bump(profile, tok, BODY_WEIGHT, mult, cfg)
+            body_sourced[tok] = body_sourced.get(tok, 0.0) + BODY_WEIGHT * mult
         if note.why:
             profile.why_lines.append((note.read_date, note.why))
     profile.why_lines.sort(key=lambda pair: pair[0] or date.min, reverse=True)
+    _cap_corpus_generic_terms(profile, body_sourced, contributing)
     dated = sorted(contributing, key=lambda p: p.read_date or date.min, reverse=True)
     profile.recent_titles = [p.title for p in dated[:3]]
     return profile
+
+
+CORPUS_GENERIC_FRACTION = 0.8
+CORPUS_GENERIC_MIN_NOTES = 3
+
+
+def _cap_corpus_generic_terms(profile: Profile, body_sourced: dict[str, float], contributing: list[PaperNote]) -> None:
+    """A term present in nearly every contributing note (quantum, state, via…) cannot
+    discriminate within the lab's own taste — the live dry-run showed generic body
+    matches dominating every why-line. When a body/title-sourced term saturates the
+    corpus (document frequency >= 80%, >= 3 notes), its body/title contribution is
+    removed; a DELIBERATE tag carrying the same word survives on its tag weight."""
+    if len(contributing) < CORPUS_GENERIC_MIN_NOTES:
+        return
+    doc_freq: dict[str, int] = {}
+    for note in contributing:
+        for tok in set(_tokens(note.title)) | set(_tokens(_clean_body(note.body))):
+            doc_freq[tok] = doc_freq.get(tok, 0) + 1
+    threshold = CORPUS_GENERIC_FRACTION * len(contributing)
+    for tok, freq in doc_freq.items():
+        if freq >= threshold and body_sourced.get(tok) and profile.terms.get(tok, 0.0) > 0:
+            profile.terms[tok] = profile.terms.get(tok, 0.0) - body_sourced[tok]
 
 
 def profile_flag(profile: Profile) -> str:
