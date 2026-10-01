@@ -1,20 +1,20 @@
-# Slack setup — the dedicated arjev bot app
+# Slack setup — the dedicated arJev bot app
 
-arjev posts each digest pick as its own message, so Slack reactions map 1:1 to papers:
+arJev posts each digest pick as its own message, so Slack reactions map 1:1 to papers:
 a `👍` on a pick message is a *keep* for that paper. Five minutes of setup, once.
 
 ## 1. Create the app
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → *From scratch*.
-2. Name it (e.g. `arjev`), pick your workspace.
+2. Name it (e.g. `arJev`), pick your workspace.
 3. **OAuth & Permissions** → add the three Bot Token Scopes:
    - `chat:write` — post digest picks
    - `reactions:read` — harvest 👍 / 👀 / ❌ on pick messages
    - `conversations.replies` — harvest thread replies as `discussed` labels
 4. **Install to Workspace** → copy the **Bot User OAuth Token** (`xoxb-…`).
-5. Invite the bot to your digest channel: `/invite @arjev`.
+5. Invite the bot to your digest channel: `/invite @arJev`.
 
-## 2. Configure arjev
+## 2. Configure arJev
 
 ```toml
 [slack]

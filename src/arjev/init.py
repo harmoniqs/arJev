@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .config import Config, default_config_path
 
-TEMPLATE = """# arjev configuration — schema of record: config/specs/spec-20260901…-arjev-v1.md (harmoniqs/arjev)
+TEMPLATE = """# arJev configuration — schema of record: config/specs/spec-20260901…-arjev-v1.md (harmoniqs/arJev)
 # The default field mapping is the Harmoniqs paper-note schema; remap [vault.fields]
 # for any Obsidian/Zotero vault.
 
