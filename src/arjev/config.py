@@ -37,6 +37,8 @@ class Config:
     probe_k: int = 20
     digest_dir: str | None = None
     library_dir: str | None = None
+    papers_dir: str | None = None
+    note_template: str | None = None
     jev_min_confidence: float = 0.6
 
     @property
@@ -73,5 +75,7 @@ def load_config(path: Path | None = None) -> Config:
     cfg.feeds = list(raw.get("feeds", cfg.feeds))
     cfg.digest_dir = raw.get("digest_dir")
     cfg.library_dir = raw.get("library_dir")
+    cfg.papers_dir = raw.get("papers_dir")
+    cfg.note_template = raw.get("note_template")
     cfg.jev_min_confidence = float(raw.get("jev", {}).get("min_confidence", cfg.jev_min_confidence))
     return cfg
