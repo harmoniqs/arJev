@@ -1,4 +1,4 @@
-# arjev
+# arJev
 
 A daily arXiv digest engine that ranks against your **living Obsidian vault**.
 
