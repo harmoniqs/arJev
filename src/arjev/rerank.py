@@ -87,11 +87,17 @@ def apply_jev(rank: RankResult, client: JevClient, profile, run_id: str, receipt
     mode_primary = "lexical-only"
     candidates: list[CandidateJournal] = []
     evaluated: list[Pick] = []
+    # survivors stay pick candidates even on fail-open (the lexical ranking IS the
+    # fallback); near-miss/probe items enter the picks ONLY on a successful rescue —
+    # a failed-open zero-score band item falls out entirely (the live dry-run caught
+    # the opposite: they silently took pick slots under an empty profile).
+    fail_reasons: dict[str, str] = {}
 
     for s in rank.pools.survivors:
         answer = _score_or_fail(client, profile, s, run_id, receipts)
         if answer is None:
             evaluated.append(Pick(s.item.arxiv, s.item.title, s.score, s.terms, 0.0, None, "state-overflow"))
+            fail_reasons[s.item.arxiv] = "state-overflow"
             continue
         if answer.ok:
             mode_primary = "jev"
@@ -99,20 +105,23 @@ def apply_jev(rank: RankResult, client: JevClient, profile, run_id: str, receipt
             evaluated.append(Pick(s.item.arxiv, s.item.title, s.score, s.terms, mass, None, None))
         else:
             evaluated.append(Pick(s.item.arxiv, s.item.title, s.score, s.terms, 0.0, None, answer.fail_reason))
+            fail_reasons[s.item.arxiv] = answer.fail_reason
 
     for pool_name, source in (("near-miss", rank.pools.near_miss), ("probe", rank.pools.probe)):
         for s in source:
             answer = _noul_or_fail(client, profile, s, run_id, receipts)
             if answer is None:
-                continue  # state-overflow: a zero-score-band item never fails INTO picks
-            if answer.ok and answer.distribution.get("true", 0.0) >= client.min_confidence:
+                fail_reasons[s.item.arxiv] = "state-overflow"
+                continue
+            if not answer.ok:
+                fail_reasons[s.item.arxiv] = answer.fail_reason
+                continue
+            if answer.distribution.get("true", 0.0) >= client.min_confidence:
                 mode_primary = "jev"
                 evaluated.append(Pick(s.item.arxiv, s.item.title, s.score, s.terms,
                                       answer.distribution.get("true", 0.0), pool_name, None))
-            elif answer.ok:
-                evaluated.append(Pick(s.item.arxiv, s.item.title, s.score, s.terms, 0.0, None, "below-threshold"))
             else:
-                evaluated.append(Pick(s.item.arxiv, s.item.title, s.score, s.terms, 0.0, None, answer.fail_reason))
+                fail_reasons[s.item.arxiv] = "below-threshold"
 
     evaluated.sort(key=lambda p: (-p.jev_primary, -p.lexical_score, p.arxiv))
     picks = evaluated[:top]
@@ -126,14 +135,15 @@ def apply_jev(rank: RankResult, client: JevClient, profile, run_id: str, receipt
     for s in rank.pools.probe:
         pool_of[s.item.arxiv] = "probe"
     pools_all = (rank.pools.survivors, rank.pools.near_miss, rank.pools.probe)
-    scored_by_id = {s.item.arxiv: s for pool in pools_all for s in pool}
-    for p in evaluated:
-        s = scored_by_id.get(p.arxiv)
+    for s in pools_all[0] + pools_all[1] + pools_all[2]:
+        receipt = next((r for r in receipts if r.candidate_arxiv == s.item.arxiv), None)
         candidates.append(CandidateJournal(
-            arxiv=p.arxiv, pool=pool_of.get(p.arxiv, "none"),
-            lexical_score=s.score if s else 0.0, terms=s.terms if s else [],
-            jev=_jev_row(p, receipts), posted=p.arxiv in picked_ids, rescued=p.rescued,
-            title=s.item.title if s else "", authors=list(s.item.authors) if s else [],
+            arxiv=s.item.arxiv, pool=pool_of[s.item.arxiv],
+            lexical_score=s.score, terms=s.terms,
+            jev=_jev_row_from_receipt(receipt, fail_reasons.get(s.item.arxiv)),
+            posted=s.item.arxiv in picked_ids,
+            rescued=next((p.rescued for p in picks if p.arxiv == s.item.arxiv), None),
+            title=s.item.title, authors=list(s.item.authors),
         ))
     # zero-score non-probe items ride the journal too (the calibration denominator pool)
     probe_ids = {s.item.arxiv for s in rank.pools.probe}
@@ -146,17 +156,16 @@ def apply_jev(rank: RankResult, client: JevClient, profile, run_id: str, receipt
     return picks, mode_primary, candidates
 
 
-def _jev_row(pick: Pick, receipts: list[JevReceipt]) -> dict | None:
-    receipt = next((r for r in receipts if r.candidate_arxiv == pick.arxiv), None)
+def _jev_row_from_receipt(receipt: JevReceipt | None, fail_reason: str | None) -> dict | None:
     if receipt is None:
-        return None
+        return {"fail_reason": fail_reason} if fail_reason else None
     row = {
         "primitive": receipt.primitive,
         "confidence": receipt.confidence,
         "top": max(receipt.distribution, key=receipt.distribution.get) if receipt.distribution else None,
     }
-    if pick.fail_reason:
-        row["fail_reason"] = pick.fail_reason
+    if fail_reason:
+        row["fail_reason"] = fail_reason
     return row
 
 
