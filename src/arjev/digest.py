@@ -19,7 +19,16 @@ from .jev import JevClient, JevReceipt
 from .profile import build_profile, profile_flag
 from .rank import rank
 from .render import canonical_picks, mode_line, render_mrkdwn, render_vault_note, write_vault_note
-from .rerank import Pick, RunRecord, apply_jev, run_id_for, state_dir, write_journal, write_run_receipts
+from .rerank import (
+    Pick,
+    RunRecord,
+    apply_jev,
+    apply_jev_first,
+    run_id_for,
+    state_dir,
+    write_journal,
+    write_run_receipts,
+)
 from .state import PostedState
 
 
@@ -72,7 +81,23 @@ def run_digest(
     client = jev_client or JevClient(key=None, min_confidence=cfg.jev_min_confidence)
     run_id = run_id_for(seed, today)
     receipts: list[JevReceipt] = []
-    picks, mode_primary, candidates = apply_jev(ranked, client, profile, run_id, receipts, top=cfg.top)
+    # the ranking amendment: jev-first is the default when the layer can run at all
+    # (no key → lexical-first automatically, the mode flag reports what ran)
+    use_jev_first = cfg.ranking == "jev-first" and client.enabled
+    if use_jev_first:
+        from .score import score_item
+
+        skip = fold.arxiv_ids() | set(PostedState.load(state_dir() / "papers-digest-state.json").ids)
+        scored_by_id = {}
+        for item in items:
+            if item.arxiv not in skip:
+                scored_by_id[item.arxiv] = score_item(item, profile)
+        picks, mode_primary, candidates = apply_jev_first(
+            items, scored_by_id, skip, client, profile, run_id, receipts,
+            top=cfg.top, pace_s=cfg.jev_pace_s,
+        )
+    else:
+        picks, mode_primary, candidates = apply_jev(ranked, client, profile, run_id, receipts, top=cfg.top)
     if receipts:
         write_run_receipts(receipts)
     mode = mode_line(mode_primary, profile_flag(profile))
@@ -85,6 +110,7 @@ def run_digest(
         mode=mode,
         seed=seed,
         candidates=candidates,
+        ranking="jev-first" if use_jev_first else "lexical-first",
     )
 
     if post == "slack":

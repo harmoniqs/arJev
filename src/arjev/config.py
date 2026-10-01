@@ -40,6 +40,8 @@ class Config:
     papers_dir: str | None = None
     note_template: str | None = None
     jev_min_confidence: float = 0.6
+    ranking: str = "jev-first"  # jev-first | lexical-first
+    jev_pace_s: float = 0.05  # politeness gap between Jev calls in jev-first
     slack_channel: str | None = None
     slack_keepers: list[str] = field(default_factory=list)
     why_style: str = "terms"  # terms | opaque | none
@@ -80,7 +82,12 @@ def load_config(path: Path | None = None) -> Config:
     for key in ("digest_dir", "library_dir", "papers_dir", "note_template"):
         # TOML: keys written after [vault] belong to that table — accept both placements
         setattr(cfg, key, raw.get(key) or vault.get(key))
-    cfg.jev_min_confidence = float(raw.get("jev", {}).get("min_confidence", cfg.jev_min_confidence))
+    jev = raw.get("jev", {})
+    cfg.jev_min_confidence = float(jev.get("min_confidence", cfg.jev_min_confidence))
+    cfg.ranking = raw.get("ranking", cfg.ranking)
+    if cfg.ranking not in ("jev-first", "lexical-first"):
+        raise ValueError(f"ranking must be jev-first or lexical-first, got {cfg.ranking!r}")
+    cfg.jev_pace_s = float(jev.get("pace_s", cfg.jev_pace_s))
     slack = raw.get("slack", {})
     cfg.slack_channel = slack.get("channel")
     cfg.slack_keepers = list(slack.get("keepers", []))

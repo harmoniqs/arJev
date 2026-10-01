@@ -31,6 +31,8 @@ def canonical_picks(picks: list[Pick]) -> list[dict]:
 def _why_terms(p: Pick, limit: int = 5) -> str:
     if p.rescued == "probe":
         return f"rescued by probe — no lexical match, Jev relevance p={p.jev_primary:.2f}"
+    if p.jev_primary > 0 and not p.terms:
+        return f"picked by Jev — no lexical match, relevance p={p.jev_primary:.2f}"
     shown = ", ".join(f"`{t}`" for t in p.terms[:limit])
     base = f"{shown} (score {p.lexical_score})" if shown else "(no terms)"
     if p.rescued == "near-miss":

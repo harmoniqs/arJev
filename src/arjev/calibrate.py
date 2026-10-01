@@ -87,7 +87,7 @@ def calibrate(cfg: Config, fold: FoldResult, runs: int = 30) -> Report:
         report.notes.append("n is small — treat every number above as a first reading, not a verdict.")
         report.recommendations.append("collect more labels before tuning any threshold (n < 20).")
     probe = report.metrics["probe_lift"]
-    if probe.get("probe_rescue_n", 0) == 0:
+    if probe.get("mode") != "jev-first" and probe.get("probe_rescue_n", 0) == 0:
         report.recommendations.append("no probe rescues yet — the probe is unmeasured, not refuted.")
     return report
 
@@ -175,6 +175,12 @@ def _probe_lift(journal: list[dict], labels_by_id: dict) -> dict:
         )
         return (round(kept / len(ids), 4) if ids else None), len(ids)
 
+    if any(line.get("ranking") == "jev-first" for line in journal):
+        return {
+            "mode": "jev-first",
+            "note": "n/a — no probe in jev-first: every eligible item is screened, "
+            "so there is no zero-score band to lift from",
+        }
     rescues, survivors = [], []
     for line in journal:
         for c in line.get("candidates", []):
