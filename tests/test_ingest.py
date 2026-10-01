@@ -214,3 +214,22 @@ def test_unrelated_note_at_the_path_is_ignored():
     # note with a different type: field is ignored entirely
     typed = parse_directives("---\ntype: digest\n---\nsome daily note")
     assert not typed.present
+
+
+def test_config_reads_digest_keys_from_both_placements(tmp_path):
+    """The TOML table trap, generalized: keys after [vault] belong to that table —
+    the config accepts digest-level keys from both top level and inside [vault]."""
+    from arjev.config import load_config
+
+    cfgfile = tmp_path / "arjev.toml"
+    cfgfile.write_text(
+        "[vault]\n"
+        'roots = ["/x"]\n'
+        'feeds = ["quant-ph", "cond-mat.mes-hall", "cs.AI"]\n'
+        "top = 7\n"
+        'ranking = "jev-first"\n'
+    )
+    cfg = load_config(cfgfile)
+    assert cfg.feeds == ["quant-ph", "cond-mat.mes-hall", "cs.AI"]
+    assert cfg.top == 7
+    assert cfg.ranking == "jev-first"

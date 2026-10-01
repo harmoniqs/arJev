@@ -77,9 +77,13 @@ def load_config(path: Path | None = None) -> Config:
         fields["identity"] = [fields["identity"]]
     cfg.fields = fields
     cfg.half_life_days = float(vault.get("half_life_days", cfg.half_life_days))
+    # TOML: keys written after a [table] header belong to that table — accept
+    # both placements for every digest-level key (the papers_dir lesson, generalized)
     for key in ("top", "screen", "probe_k"):
-        setattr(cfg, key, int(raw.get(key, getattr(cfg, key))))
-    cfg.feeds = list(raw.get("feeds", cfg.feeds))
+        setattr(cfg, key, int(raw.get(key, vault.get(key, getattr(cfg, key)))))
+    cfg.feeds = list(raw.get("feeds", vault.get("feeds", cfg.feeds)))
+    if "ranking" in vault and "ranking" not in raw:
+        cfg.ranking = vault["ranking"]
     for key in ("digest_dir", "library_dir", "papers_dir", "note_template"):
         # TOML: keys written after [vault] belong to that table — accept both placements
         setattr(cfg, key, raw.get(key) or vault.get(key))
