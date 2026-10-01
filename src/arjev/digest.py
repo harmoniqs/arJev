@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from .config import Config
-from .feed import load_feed
+from .feed import load_feed, load_feeds
 from .fold import fold_roots
 from .jev import JevClient, JevReceipt
 from .profile import build_profile, profile_flag
@@ -67,7 +67,7 @@ def run_digest(
     seed = seed or f"{feed or feed_file or 'quant-ph'}:{today.isoformat()}"
     fold = fold_roots(cfg.expanded_roots, cfg)
     profile = build_profile(fold, cfg, today)
-    items = load_feed(feed, feed_file)
+    items = load_feed(feed, feed_file) if (feed or feed_file) else load_feeds(cfg.feeds)
     ranked = rank(
         items,
         profile,
@@ -101,7 +101,7 @@ def run_digest(
     if receipts:
         write_run_receipts(receipts)
     mode = mode_line(mode_primary, profile_flag(profile))
-    feed_name = feed or (Path(feed_file).stem if feed_file else cfg.feeds[0])
+    feed_name = feed or (Path(feed_file).stem if feed_file else "+".join(cfg.feeds))
 
     record = RunRecord(
         run_id=run_id,

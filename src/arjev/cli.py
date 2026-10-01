@@ -48,6 +48,15 @@ def main(argv: list[str] | None = None) -> int:
     p_slack_sync = p_slack_sub.add_parser("sync", help="harvest reactions/replies → labels; auto-scaffold keeps")
     p_slack_sync.add_argument("--config", default=None)
 
+    p_ingest = sub.add_parser("ingest", help="seed the taste profile: BibTeX, a PDF folder, or a Slack channel")
+    p_ingest.add_argument("--bibtex", default=None, help="path to a .bib export (Google Scholar / Zotero)")
+    p_ingest.add_argument("--pdf-dir", default=None, help="folder of papers (ids from filenames/stamps)")
+    p_ingest.add_argument("--slack-channel", default=None, help="channel name — harvest human-shared arXiv links")
+    p_ingest.add_argument("--slack-channel-id", default=None, help="channel id (when the name is not in the config)")
+    p_ingest.add_argument("--limit", type=int, default=200, help="Slack history window")
+    p_ingest.add_argument("--papers-dir", default=None, help="where seeded notes land (default: config papers dir)")
+    p_ingest.add_argument("--config", default=None)
+
     p_cal = sub.add_parser("calibrate", help="replay joins → Brier, reliability, precision@5, probe lift")
     p_cal.add_argument("--config", default=None)
     p_cal.add_argument("--runs", type=int, default=30, help="journal window (last N runs)")
@@ -114,6 +123,39 @@ def main(argv: list[str] | None = None) -> int:
         new = labels_sync(cfg, fold_roots(cfg.expanded_roots, cfg), ledger, now=datetime.now())
         print(f"{len(new)} new label rows; ledger holds {len(ledger.rows())}")
         return 0
+    if args.cmd == "ingest":
+        from datetime import date
+
+        from arjev.config import load_config
+        from arjev.ingest import ingest_bibtex, ingest_pdf_dir, ingest_slack_channel
+
+        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        papers_dir = Path(args.papers_dir).expanduser() if args.papers_dir else None
+        today = date.today()
+        total = 0
+        if args.bibtex:
+            hits = ingest_bibtex(Path(args.bibtex).expanduser(), cfg, today, papers_dir)
+            print(f"bibtex: {len(hits)} papers seeded from {args.bibtex}")
+            total += len(hits)
+        if args.pdf_dir:
+            hits = ingest_pdf_dir(Path(args.pdf_dir).expanduser(), cfg, today, papers_dir)
+            print(f"pdf-dir: {len(hits)} papers seeded from {args.pdf_dir}")
+            total += len(hits)
+        if args.slack_channel or args.slack_channel_id:
+            from arjev.digest import slack_token
+            from arjev.slack import SlackClient
+
+            name = args.slack_channel or args.slack_channel_id
+            channel_id = args.slack_channel_id or _resolve_channel(cfg, args.slack_channel)
+            users = _slack_users()
+            hits = ingest_slack_channel(
+                SlackClient(token=slack_token()), channel_id, name, users,
+                cfg, today, papers_dir, limit=args.limit,
+            )
+            print(f"slack: {len(hits)} human-shared papers seeded from #{name}")
+            total += len(hits)
+        print(f"{total} seeded notes total (existing ids skipped, never edited)")
+        return 0
     if args.cmd == "calibrate":
         from arjev.calibrate import calibrate
         from arjev.config import load_config
@@ -164,6 +206,24 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     parser.error(f"unknown command {args.cmd!r}")
     return 2
+
+
+def _resolve_channel(cfg, name: str) -> str:
+    """Channel name → id via the config's slack section, or accept a raw id."""
+    from arjev.slack import resolve_channel
+
+    return resolve_channel(cfg, name)
+
+
+def _slack_users() -> dict[str, str]:
+    """user id → display name, from the amico users cache when present."""
+    path = Path.home() / ".amico" / "slack" / "users.json"
+    if not path.is_file():
+        return {}
+    try:
+        return {u.get("id"): u.get("name") or u.get("real_name") or u.get("id") for u in json.loads(path.read_text())}
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 
 def _candidate_from_journal(arxiv: str, journal_file: Path):
