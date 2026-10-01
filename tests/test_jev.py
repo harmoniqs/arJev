@@ -199,3 +199,15 @@ def test_journal_records_pool_membership_and_seed(monkeypatch, tmp_path):
 
 def _journal(tmp_path):
     return tmp_path / "state" / "arjev" / "digest-journal.jsonl"
+
+
+def test_empty_profile_yields_zero_picks_not_probe_fillers(monkeypatch, tmp_path):
+    """The live dry-run caught this: with a degraded profile (all-zero scores) and no
+    Jev key, fail-open probe items silently occupied pick slots. Fail-open zero-score
+    band items fall out of the picks entirely."""
+    isolate_state(monkeypatch, tmp_path)
+    cfg = Config()
+    cfg.roots = []  # empty vault → degraded profile, nothing scores
+    result = run_digest(cfg, feed_file=str(RSS), today=TODAY, seed="s")
+    assert result.picks == []
+    assert result.mode == "mode: lexical-only, profile-degraded"
