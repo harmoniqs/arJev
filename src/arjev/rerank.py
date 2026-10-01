@@ -37,6 +37,7 @@ class CandidateJournal:
     rescued: str | None
     title: str = ""
     authors: list[str] = field(default_factory=list)
+    slack_ts: str = ""
 
 
 @dataclass
@@ -47,6 +48,7 @@ class RunRecord:
     mode: str
     seed: str
     candidates: list[CandidateJournal]
+    slack_channel: str | None = None
 
     def to_json(self) -> str:
         return json.dumps(
@@ -57,6 +59,7 @@ class RunRecord:
                 "mode": self.mode,
                 "seed": self.seed,
                 "candidates": [c.__dict__ for c in self.candidates],
+                "slack_channel": self.slack_channel,
             },
             sort_keys=True,
         )
