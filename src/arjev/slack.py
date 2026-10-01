@@ -59,6 +59,10 @@ class SlackClient:
         msg = self._call("reactions.get", {"channel": channel, "timestamp": ts, "full": True})
         return list(msg.get("message", {}).get("reactions", []))
 
+    def channel_history(self, channel: str, limit: int = 200) -> list[dict]:
+        msgs = self._call("conversations.history", {"channel": channel, "limit": limit})
+        return list(msgs.get("messages", []))
+
     def get_replies(self, channel: str, ts: str) -> list[dict]:
         msgs = self._call("conversations.replies", {"channel": channel, "ts": ts, "limit": 100})
         return [m for m in msgs.get("messages", []) if m.get("ts") != ts]  # drop the parent
@@ -121,3 +125,13 @@ def harvest_labels(client: SlackClient, channel: str, posted: list[dict],
             discussed.append(arxiv)  # flavor: never an auto-keep
             labels.append(Label(arxiv, "discussed", "slack-reply", now_ts))
     return labels, new_keeps, discussed
+
+
+def resolve_channel(cfg, name: str) -> str:
+    """Channel ids only — a bare name is an error to make loudly, never a guess
+    (the config's slack.channel carries the id for the digest channel)."""
+    import re
+
+    if re.fullmatch(r"[CGD][0-9A-Z]{6,}", name):
+        return name
+    raise SystemExit(f"channel {name!r} is a name, not an id — pass --slack-channel-id")

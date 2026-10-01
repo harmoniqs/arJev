@@ -49,6 +49,14 @@ def load_template(cfg) -> str:
     return DEFAULT_TEMPLATE
 
 
+def find_note_for_id(papers_dir: Path, arxiv: str) -> Path | None:
+    """The note that already owns this id, if any (the seed's never-edit guard)."""
+    for existing in papers_dir.glob("*.md"):
+        if _identity_of(existing.read_text(errors="replace")) == arxiv:
+            return existing
+    return None
+
+
 def scaffold_note(candidate: KeepCandidate, cfg, today: date, papers_dir: Path | None = None) -> Path:
     """Write the staged stub. Idempotent: an existing note for the id is returned as-is
     (never edit an existing note — obligation: write safety)."""

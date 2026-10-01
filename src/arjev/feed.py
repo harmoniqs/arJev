@@ -82,3 +82,24 @@ def load_feed(feed: str | None = None, feed_file: str | None = None) -> list[Fee
     if feed_file:
         return parse_arxiv_rss(Path(feed_file).read_text())
     return parse_arxiv_rss(fetch_feed(feed_url(feed or "quant-ph")))
+
+
+def load_feeds(feeds: list[str], feed_files: list[str] | None = None) -> list[FeedItem]:
+    """The multi-feed union: fetch every configured feed, union the items, dedupe by
+    normalized arXiv id (cross-listed papers appear in several category feeds — one
+    candidate, scored once). Feed order preserved for the winner."""
+    items: list[FeedItem] = []
+    seen: set[str] = set()
+    for path in feed_files or []:
+        for item in parse_arxiv_rss(Path(path).read_text()):
+            if item.arxiv not in seen:
+                seen.add(item.arxiv)
+                items.append(item)
+    if not feeds:
+        return items
+    for name in feeds:
+        for item in parse_arxiv_rss(fetch_feed(feed_url(name))):
+            if item.arxiv not in seen:
+                seen.add(item.arxiv)
+                items.append(item)
+    return items
