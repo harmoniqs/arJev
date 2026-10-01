@@ -5,31 +5,37 @@
 <item>
   <title>Synthetic: $\sqrt{\text{X}}$-gate calibration with randomized compiling</title>
   <link>http://arxiv.org/abs/2601.01011v2</link>
+  <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">A. Synthetic and B. Example</dc:creator>
   <description>&lt;p&gt;Synthetic abstract about randomized compiling and detection-rate surrogates for surface-code calibration.&lt;/p&gt;</description>
 </item>
 <item>
   <title>Synthetic: blockade-assisted entanglement with fast Rydberg pulses</title>
   <link>http://arxiv.org/abs/2601.01012v1</link>
+  <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">C. Fixture</dc:creator>
   <description>&lt;p&gt;Synthetic abstract about Rydberg blockade radius and pulse shaping on neutral-atom arrays.&lt;/p&gt;</description>
 </item>
 <item>
   <title>Synthetic: jitter-robust control of superconducting qubits</title>
   <link>http://arxiv.org/abs/2601.01013v1</link>
+  <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">F. Author13</dc:creator>
   <description>&lt;p&gt;Synthetic abstract about jitter-robust optimal control and amplitude constraints.&lt;/p&gt;</description>
 </item>
 <item>
   <title>Synthetic: cat-qubit readout through an engineered buffer</title>
   <link>http://arxiv.org/abs/2601.01014v1</link>
+  <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">F. Author14</dc:creator>
   <description>&lt;p&gt;Synthetic abstract about two-photon dissipation and bosonic cat states.&lt;/p&gt;</description>
 </item>
 <item>
   <title>Synthetic: silicon spin shuttling over micrometer distances</title>
   <link>http://arxiv.org/abs/2601.01015v1</link>
+  <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">F. Author15</dc:creator>
   <description>&lt;p&gt;Synthetic abstract about electron shuttling in silicon quantum dots.&lt;/p&gt;</description>
 </item>
 <item>
   <title>Synthetic: quantum algorithms for classical simulation</title>
   <link>http://arxiv.org/abs/2601.01016v1</link>
+  <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">F. Author16</dc:creator>
   <description>&lt;p&gt;Synthetic abstract with zero overlap on any fixture-vault term — the recall-probe case.&lt;/p&gt;</description>
 </item>
 </channel></rss>

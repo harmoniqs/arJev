@@ -4,7 +4,7 @@ The fetch seam is injectable — CI reads the recorded fixture; live runs GET po
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from html import unescape
 from pathlib import Path
 
@@ -21,6 +21,7 @@ class FeedItem:
     arxiv: str  # normalized (vN stripped)
     title: str
     abstract: str  # tag-stripped, entity-unescaped, capped
+    authors: list[str] = field(default_factory=list)
 
 
 def _strip_tags(s: str) -> str:
@@ -47,6 +48,11 @@ def parse_arxiv_rss(xml: str) -> list[FeedItem]:
         desc_el = item.find("description")
         if title_el is None or link_el is None or _text_of(title_el) is None:
             continue
+        authors = [
+            _strip_tags(t.text)
+            for t in item.iter()
+            if t.tag.endswith("creator") or t.tag.endswith("author")
+        ]
         m = _ABSPATH.search(_text_of(link_el).strip())
         if not m:
             continue
@@ -56,6 +62,7 @@ def parse_arxiv_rss(xml: str) -> list[FeedItem]:
                 arxiv=normalize_arxiv(m.group(1)),
                 title=_strip_tags(_text_of(title_el)),
                 abstract=desc[:2000],
+                authors=[a for a in authors if a],
             )
         )
     return items

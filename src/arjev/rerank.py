@@ -7,7 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -35,6 +35,8 @@ class CandidateJournal:
     jev: dict | None  # {primitive, confidence, top, fail_reason}
     posted: bool
     rescued: str | None
+    title: str = ""
+    authors: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -128,6 +130,7 @@ def apply_jev(rank: RankResult, client: JevClient, profile, run_id: str, receipt
             arxiv=p.arxiv, pool=pool_of.get(p.arxiv, "none"),
             lexical_score=s.score if s else 0.0, terms=s.terms if s else [],
             jev=_jev_row(p, receipts), posted=p.arxiv in picked_ids, rescued=p.rescued,
+            title=s.item.title if s else "", authors=list(s.item.authors) if s else [],
         ))
     # zero-score non-probe items ride the journal too (the calibration denominator pool)
     probe_ids = {s.item.arxiv for s in rank.pools.probe}

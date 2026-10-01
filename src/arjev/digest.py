@@ -18,7 +18,8 @@ from .jev import JevClient, JevReceipt
 from .profile import build_profile, profile_flag
 from .rank import rank
 from .render import canonical_picks, mode_line, render_mrkdwn, render_vault_note, write_vault_note
-from .rerank import Pick, RunRecord, apply_jev, run_id_for, write_journal, write_run_receipts
+from .rerank import Pick, RunRecord, apply_jev, run_id_for, state_dir, write_journal, write_run_receipts
+from .state import PostedState
 
 
 @dataclass
@@ -53,7 +54,7 @@ def run_digest(
         items,
         profile,
         corpus_ids=fold.arxiv_ids(),
-        posted_ids=set(),  # slice 3 wires the posted-state join
+        posted_ids=set(PostedState.load(state_dir() / "papers-digest-state.json").ids),
         top=cfg.top,
         screen=cfg.screen,
         probe_k=cfg.probe_k,
@@ -78,6 +79,8 @@ def run_digest(
         candidates=candidates,
     )
     write_journal(record)
+    state_file = state_dir() / "papers-digest-state.json"
+    PostedState.load(state_file).append([p.arxiv for p in picks])
     if post == "vault":
         digest_dir = Path(cfg.digest_dir).expanduser() if cfg.digest_dir else cfg.expanded_roots[0] / "digests"
         note = render_vault_note(picks, feed_name, total=len(items), today=today, mode=mode,
