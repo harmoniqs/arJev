@@ -42,7 +42,7 @@ def _label_ledger(rows: list[tuple[str, str, str]]) -> None:
 
 
 def test_brier_exact_values_on_known_data(tmp_path):
-    isolate_state_monkey = _monkey(tmp_path)
+    _monkey(tmp_path)
     # score: p(positive)=0.8 kept → (0.2)^2 = 0.04; noul: p=0.9 kept → 0.01; noul skip p=0.9 → 0.81
     _write_state(tmp_path, [
         _receipt("2601.01011", "score", {"must-read": 0.6, "worth-reading": 0.2, "irrelevant": 0.2}),
@@ -62,7 +62,7 @@ def test_brier_exact_values_on_known_data(tmp_path):
 
 
 def test_reliability_bins_are_ten_equal_width(tmp_path):
-    isolate_state_monkey = _monkey(tmp_path)
+    _monkey(tmp_path)
     _write_state(tmp_path, [
         _receipt("2601.01011", "noul", {"true": 0.05, "false": 0.95}),  # bin 0, observed 0
         _receipt("2601.01012", "noul", {"true": 0.15, "false": 0.85}),   # bin 1, observed 1
