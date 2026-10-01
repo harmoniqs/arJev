@@ -2,33 +2,22 @@
 vault-note sink, and the no-key fail-open path (acceptance metrics for slice 1)."""
 
 import os
-from datetime import date
-from pathlib import Path
 
-from arjev.config import Config
 from arjev.digest import run_digest
 from arjev.init import init_config
-
-FIXTURES = Path(__file__).parent / "fixtures"
-VAULT = FIXTURES / "vault"
-RSS = FIXTURES / "rss-quant-ph.xml"
-TODAY = date(2026, 10, 1)
+from conftest import RSS, TODAY, VAULT, digest_cfg, isolate_state
 
 
-def digest_cfg() -> Config:
-    cfg = Config()
-    cfg.roots = [str(VAULT)]
-    return cfg
-
-
-def test_fingerprint_deterministic_two_runs():
+def test_fingerprint_deterministic_two_runs(monkeypatch, tmp_path):
+    isolate_state(monkeypatch, tmp_path)
     a = run_digest(digest_cfg(), feed_file=str(RSS), today=TODAY, seed="2026-10-01")
     b = run_digest(digest_cfg(), feed_file=str(RSS), today=TODAY, seed="2026-10-01")
     assert a.fingerprint == b.fingerprint
     assert a.markdown == b.markdown
 
 
-def test_no_key_mode_is_lexical_only_ok():
+def test_no_key_mode_is_lexical_only_ok(monkeypatch, tmp_path):
+    isolate_state(monkeypatch, tmp_path)
     env_key = os.environ.pop("ARJEV_JEV_KEY", None)
     try:
         result = run_digest(digest_cfg(), feed_file=str(RSS), today=TODAY, seed="s")
@@ -48,6 +37,7 @@ def test_init_bootstrap_produces_runnable_config(tmp_path, monkeypatch):
 
 
 def test_init_smoke_vault_sink_writes_digest_note(tmp_path, monkeypatch):
+    isolate_state(monkeypatch, tmp_path)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     cfg = digest_cfg()
     cfg.digest_dir = str(tmp_path / "digests")
@@ -63,7 +53,8 @@ def test_init_smoke_vault_sink_writes_digest_note(tmp_path, monkeypatch):
     assert note.read_text() == content
 
 
-def test_corpus_papers_never_picked():
+def test_corpus_papers_never_picked(monkeypatch, tmp_path):
+    isolate_state(monkeypatch, tmp_path)
     result = run_digest(digest_cfg(), feed_file=str(RSS), today=TODAY, seed="s")
     picked = set()
     for line in result.markdown.splitlines():
