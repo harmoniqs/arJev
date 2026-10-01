@@ -108,6 +108,20 @@ class JevClient:
         }
         return self._call("score", state, candidate_arxiv, run_id, receipts, question)
 
+    def choice_rating(self, state: dict, candidate_arxiv: str, run_id: str,
+                      receipts: list[JevReceipt]) -> JevAnswer:
+        """The library-rating question (arjev rate): one of core/useful/marginal for
+        a PAPER NOTE — a different judgment from digest relevance."""
+        from .rate import RATING_LEVELS, RATING_RUBRICS
+
+        question = {
+            "id": "library_rating",
+            "type": "choice",
+            "instructions": "Rate this paper note for the researcher's library.",
+            "criteria": {level: RATING_RUBRICS[level] for level in RATING_LEVELS},
+        }
+        return self._call("score", state, candidate_arxiv, run_id, receipts, question)
+
     def noul_relevant(self, state: dict, candidate_arxiv: str, run_id: str,
                       receipts: list[JevReceipt]) -> JevAnswer:
         question = {

@@ -29,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     p_digest.add_argument("--top", type=int, default=None)
     p_digest.add_argument("--screen", type=int, default=None)
     p_digest.add_argument("--probe-k", type=int, default=None)
+    p_digest.add_argument("--enrich", action="store_true", help="run the enrich_command for prose (fail-open)")
 
     p_keep = sub.add_parser("keep", help="record a keep: label row + staged vault stub")
     p_keep.add_argument("arxiv", help="arXiv id (normalization handles vN suffixes)")
@@ -57,6 +58,15 @@ def main(argv: list[str] | None = None) -> int:
     p_ingest.add_argument("--papers-dir", default=None, help="where seeded notes land (default: config papers dir)")
     p_ingest.add_argument("--config", default=None)
 
+    p_rate = sub.add_parser("rate", help="advisory ratings: Jev proposes, you accept")
+    p_rate_sub = p_rate.add_subparsers(dest="rate_cmd", required=True)
+    p_rate_prop = p_rate_sub.add_parser("propose", help="Jev first pass on unrated notes → side table")
+    p_rate_prop.add_argument("--config", default=None)
+    p_rate_accept = p_rate_sub.add_parser("accept", help="write a rating into the note — the human gate")
+    p_rate_accept.add_argument("arxiv")
+    p_rate_accept.add_argument("rating", choices=["core", "useful", "marginal"])
+    p_rate_accept.add_argument("--config", default=None)
+
     p_cal = sub.add_parser("calibrate", help="replay joins → Brier, reliability, precision@5, probe lift")
     p_cal.add_argument("--config", default=None)
     p_cal.add_argument("--runs", type=int, default=30, help="journal window (last N runs)")
@@ -79,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
             value = getattr(args, attr)
             if value is not None:
                 setattr(cfg, attr, value)
-        result = run_digest(cfg, feed=args.feed, feed_file=args.feed_file, post=args.post)
+        result = run_digest(cfg, feed=args.feed, feed_file=args.feed_file, post=args.post, enrich=args.enrich)
         print(result.markdown)
         print(f"\n[fingerprint {result.fingerprint} · {result.mode} · {result.picks} picks]")
         return 0
@@ -155,6 +165,47 @@ def main(argv: list[str] | None = None) -> int:
             print(f"slack: {len(hits)} human-shared papers seeded from #{name}")
             total += len(hits)
         print(f"{total} seeded notes total (existing ids skipped, never edited)")
+        return 0
+    if args.cmd == "rate" and args.rate_cmd == "propose":
+        from datetime import date
+
+        from arjev.config import load_config
+        from arjev.fold import fold_roots
+        from arjev.jev import JevClient, JevReceipt
+        from arjev.profile import build_profile
+        from arjev.rate import propose_ratings
+        from arjev.rerank import run_id_for, write_run_receipts
+
+        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        fold = fold_roots(cfg.expanded_roots, cfg)
+        profile = build_profile(fold, cfg, date.today())
+        client = JevClient(key=None, min_confidence=0.0)  # proposals accept any top level
+        receipts: list[JevReceipt] = []
+        made = propose_ratings(fold, client, profile, run_id_for("rate", date.today()), receipts)
+        if receipts:
+            write_run_receipts(receipts)
+        by_rating = {}
+        for proposal in made:
+            by_rating[proposal.rating] = by_rating.get(proposal.rating, 0) + 1
+        print(f"{len(made)} proposals written to the side table (vault untouched): {by_rating}")
+        print("review with: arjev rate accept <arxiv> <core|useful|marginal>")
+        return 0
+    if args.cmd == "rate" and args.rate_cmd == "accept":
+        from arjev.config import load_config
+        from arjev.fold import fold_roots
+        from arjev.rate import accept_rating
+
+        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        fold = fold_roots(cfg.expanded_roots, cfg)
+        from arjev.fold import normalize_arxiv
+
+        target = normalize_arxiv(args.arxiv)
+        note = next((n for n in fold.papers if n.arxiv == target), None)
+        if note is None:
+            print(f"no vault note for {args.arxiv}", file=sys.stderr)
+            return 1
+        path = accept_rating(note, args.rating, papers_dir=None)
+        print(f"rated {args.arxiv} as {args.rating} in {path.name}")
         return 0
     if args.cmd == "calibrate":
         from arjev.calibrate import calibrate

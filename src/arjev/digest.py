@@ -42,6 +42,29 @@ class DigestResult:
     journal_rows: int = 0
 
 
+ENRICH_CAP = 4096
+
+
+def _enrich(markdown: str, picks: list[Pick], mode: str, command: str) -> str:
+    """The enrichment seam (docs/amicode-integration.md): the command receives the
+    canonical picks JSON on stdin and its stdout (capped) is appended to the digest.
+    The deterministic core stays text-free; prose is separable and fail-open — a
+    broken or missing command NEVER breaks the digest."""
+    import subprocess
+
+    payload = json.dumps(
+        {"mode": mode, "picks": canonical_picks(picks), "titles": {p.arxiv: p.title for p in picks}},
+        sort_keys=True,
+    )
+    try:
+        out = subprocess.run(command, shell=True, input=payload, capture_output=True, text=True, timeout=120)
+        if out.returncode == 0 and out.stdout.strip():
+            return markdown + "\n\n" + out.stdout.strip()[:ENRICH_CAP]
+    except (subprocess.SubprocessError, OSError):
+        pass
+    return markdown
+
+
 def fingerprint_picks(picks: list[Pick]) -> str:
     return hashlib.sha256(json.dumps(canonical_picks(picks), sort_keys=True).encode()).hexdigest()[:16]
 
@@ -62,6 +85,7 @@ def run_digest(
     seed: str | None = None,
     jev_client: JevClient | None = None,
     slack_client=None,
+    enrich: bool = False,
 ) -> DigestResult:
     today = today or date.today()
     seed = seed or f"{feed or feed_file or 'quant-ph'}:{today.isoformat()}"
@@ -144,6 +168,8 @@ def run_digest(
 
     markdown = render_mrkdwn(picks, feed_name, total=len(items), today=today, mode=mode,
                               skipped_corpus=len(ranked.skipped_corpus))
+    if enrich and cfg.enrich_command:
+        markdown = _enrich(markdown, picks, mode, cfg.enrich_command)
     return DigestResult(
         markdown=markdown,
         fingerprint=fingerprint_picks(picks),

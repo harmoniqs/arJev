@@ -42,6 +42,7 @@ class Config:
     jev_min_confidence: float = 0.6
     ranking: str = "jev-first"  # jev-first | lexical-first
     directives_path: str | None = None  # default: <roots[0]>/arjev-directives.md
+    enrich_command: str | None = None  # the text-generation seam (docs/amicode-integration.md)
     jev_pace_s: float = 0.05  # politeness gap between Jev calls in jev-first
     slack_channel: str | None = None
     slack_keepers: list[str] = field(default_factory=list)
@@ -93,7 +94,8 @@ def load_config(path: Path | None = None) -> Config:
     if cfg.ranking not in ("jev-first", "lexical-first"):
         raise ValueError(f"ranking must be jev-first or lexical-first, got {cfg.ranking!r}")
     cfg.jev_pace_s = float(jev.get("pace_s", cfg.jev_pace_s))
-    cfg.directives_path = raw.get("directives_path")
+    cfg.directives_path = raw.get("directives_path") or vault.get("directives_path")
+    cfg.enrich_command = raw.get("enrich_command") or vault.get("enrich_command")
     slack = raw.get("slack", {})
     cfg.slack_channel = slack.get("channel")
     cfg.slack_keepers = list(slack.get("keepers", []))

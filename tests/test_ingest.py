@@ -13,7 +13,7 @@ from arjev.ingest import ingest_bibtex, ingest_pdf_dir, ingest_slack_channel
 from arjev.jev import assemble_state
 from arjev.keep import KeepCandidate, scaffold_note
 from arjev.profile import DIRECTIVE_WEIGHT, build_profile
-from conftest import FIXTURES
+from conftest import FIXTURES, digest_cfg, isolate_state
 
 TODAY_D = date(2026, 10, 1)
 
@@ -233,3 +233,96 @@ def test_config_reads_digest_keys_from_both_placements(tmp_path):
     assert cfg.feeds == ["quant-ph", "cond-mat.mes-hall", "cs.AI"]
     assert cfg.top == 7
     assert cfg.ranking == "jev-first"
+
+
+# ── the advisory rating loop + the enrichment seam ─────────────────────────────
+
+def test_propose_writes_side_table_not_vault(monkeypatch, tmp_path):
+    isolate_state(monkeypatch, tmp_path)
+    from arjev.jev import JevClient
+    from arjev.profile import build_profile
+    from arjev.rate import load_proposals, propose_ratings
+
+    vault = tmp_path / "vault"
+    (vault / "papers").mkdir(parents=True)
+    (vault / "papers" / "p.md").write_text(
+        '---\ntype: paper\narxiv: "2601.01001"\ntitle: "unrated"\nwhy: "x"\n---\nbody'
+    )
+    (vault / "papers" / "q.md").write_text(
+        '---\ntype: paper\narxiv: "2601.01002"\ntitle: "already rated"\nrating: core\nwhy: "x"\n---\nbody'
+    )
+    cfg = Config()
+    cfg.roots = [str(vault)]
+
+    class RateTransport:
+        calls = []
+
+        def __call__(self, url, key, payload):
+            RateTransport.calls.append(payload)
+            qid, question = next(iter(payload["questions"].items()))
+            assert question["id"] == "library_rating"
+            assert "core" in question["criteria"] and "marginal" in question["criteria"]
+            return {"model": "test-1", "answers": {qid: {
+                "type": "choice", "choice": "useful", "confidence": 0.8,
+                "probabilities": {"core": 0.2, "useful": 0.8, "marginal": 0.0}}}}
+
+    fold = fold_roots(cfg.expanded_roots, cfg)
+    profile = build_profile(fold, cfg, TODAY_D)
+    client = JevClient(key="k", min_confidence=0.0, transport=RateTransport())
+    made = propose_ratings(fold, client, profile, "r1", [])
+    assert [m.arxiv for m in made] == ["2601.01001"]  # the rated note is skipped
+    proposals = load_proposals()
+    assert proposals["2601.01001"]["rating"] == "useful"
+    # the vault is untouched — no machine field ever lands in a note
+    assert "rating" not in (vault / "papers" / "p.md").read_text().split("---")[1]
+
+
+def test_accept_is_the_human_gate(monkeypatch, tmp_path):
+    isolate_state(monkeypatch, tmp_path)
+    from arjev.rate import accept_rating, load_proposals, save_proposals
+
+    papers = tmp_path / "papers"
+    papers.mkdir()
+    note_file = papers / "p.md"
+    note_file.write_text('---\ntype: paper\narxiv: "2601.01001"\nwhy: "x"\n---\nbody\n')
+    save_proposals({"2601.01001": {"rating": "useful", "confidence": 0.8}})
+
+    from arjev.fold import fold_roots
+    cfg = Config()
+    cfg.roots = [str(tmp_path)]
+    note = fold_roots(cfg.expanded_roots, cfg).papers[0]
+    accept_rating(note, "core", papers)
+    assert "rating: core" in note_file.read_text()
+    assert "2601.01001" not in load_proposals(), "the accept clears the side table"
+    import pytest
+
+    with pytest.raises(ValueError, match="already carries"):
+        accept_rating(note, "useful", papers), "a second accept never overwrites the human's rating"
+
+
+def test_rating_weights_the_profile(tmp_path):
+    vault = tmp_path / "vault"
+    (vault / "papers").mkdir(parents=True)
+    (vault / "papers" / "core.md").write_text(
+        '---\ntype: paper\narxiv: "2601.01001"\ntags: [sharedterm]\nrating: core\nwhy: "x"\n---\n')
+    (vault / "papers" / "marginal.md").write_text(
+        '---\ntype: paper\narxiv: "2601.01002"\ntags: [sharedterm]\nrating: marginal\nwhy: "x"\n---\n')
+    cfg = Config()
+    cfg.roots = [str(vault)]
+    profile = build_profile(fold_roots(cfg.expanded_roots, cfg), cfg, TODAY_D)
+    # core pulls 3x harder than marginal (1.5 vs 0.5) at equal tags and decay
+    assert profile.terms["sharedterm"] == 3.0 * (1.5 + 0.5)
+
+
+def test_enrichment_seam_appends_and_fails_open(monkeypatch, tmp_path):
+    isolate_state(monkeypatch, tmp_path)
+    cfg = digest_cfg()
+    cfg.enrich_command = "echo \"### Today take:\" && cat > /dev/null"
+    from arjev.digest import run_digest
+
+    result = run_digest(cfg, feed_file=str(FIXTURES / "rss-quant-ph.xml"), today=TODAY_D, seed="s", enrich=True)
+    assert "### Today take:" in result.markdown
+
+    cfg.enrich_command = "exit 1"
+    result = run_digest(cfg, feed_file=str(FIXTURES / "rss-quant-ph.xml"), today=TODAY_D, seed="s", enrich=True)
+    assert "Today take:" not in result.markdown and result.picks, "a broken seam never breaks the digest"
