@@ -105,8 +105,12 @@ def build_profile(fold: FoldResult, cfg, now: date, directives=None) -> Profile:
     profile.note_count = len(fold.papers)
     profile.degraded = len(fold.papers) < DEGRADED_MIN_NOTES or not any(p.why for p in contributing)
     body_sourced: dict[str, float] = {}
+    from .rate import RATING_WEIGHT
+
     for note in contributing:
-        mult = _decay(note.read_date, now, cfg.half_life_days) * (1 + 0.5 * min(3, note.inlinks))
+        # the human's own verdict pulls harder: core 1.5x, marginal 0.5x
+        rating_mult = RATING_WEIGHT.get(note.rating or "", 1.0)
+        mult = rating_mult * _decay(note.read_date, now, cfg.half_life_days) * (1 + 0.5 * min(3, note.inlinks))
         for tag in note.tags:
             _bump(profile, tag, TAG_WEIGHT, mult, cfg)
         for tok in _tokens(note.title) + _tokens(_clean_body(note.body)):
