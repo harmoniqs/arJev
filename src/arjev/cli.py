@@ -56,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
     p_ingest.add_argument("--slack-channel-id", default=None, help="channel id (when the name is not in the config)")
     p_ingest.add_argument("--limit", type=int, default=200, help="Slack history window")
     p_ingest.add_argument("--papers-dir", default=None, help="where seeded notes land (default: config papers dir)")
+    p_ingest.add_argument("--backfill-titles", action="store_true",
+                          help="fetch real titles for placeholder-titled seed notes (explicit human-invoked repair)")
     p_ingest.add_argument("--config", default=None)
 
     p_rate = sub.add_parser("rate", help="advisory ratings: Jev proposes, you accept")
@@ -143,6 +145,12 @@ def main(argv: list[str] | None = None) -> int:
         papers_dir = Path(args.papers_dir).expanduser() if args.papers_dir else None
         today = date.today()
         total = 0
+        if args.backfill_titles:
+            from arjev.ingest import backfill_titles
+
+            fixed = backfill_titles(papers_dir or (Path(cfg.expanded_roots[0]) / "papers"))
+            print(f"backfill: {fixed} placeholder titles replaced with real arXiv titles")
+            return 0
         if args.bibtex:
             hits = ingest_bibtex(Path(args.bibtex).expanduser(), cfg, today, papers_dir)
             print(f"bibtex: {len(hits)} papers seeded from {args.bibtex}")
