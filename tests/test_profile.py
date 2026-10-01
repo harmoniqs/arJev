@@ -60,8 +60,9 @@ def test_thin_fold_is_degraded(tmp_path):
     assert profile_flag(profile) == "profile-degraded"
 
 
-def test_staged_audit_catches_a_real_leak(tmp_path):
-    # a good note legitimately carries leakytag; the untouched staged stub is distinctive
+def test_staged_audit_catches_a_broken_gate(tmp_path):
+    # the audit exists to catch a GATE BUG: untouched staged notes contributing taste.
+    # Simulate it by breaking the gate condition itself.
     (tmp_path / "s.md").write_text(
         '---\ntype: paper\narxiv: "2601.01007"\nstatus: staged\ntags: [seededstub]\n---\n'
         "body about the seededstub only"
@@ -69,17 +70,17 @@ def test_staged_audit_catches_a_real_leak(tmp_path):
     (tmp_path / "p.md").write_text('---\ntype: paper\narxiv: "2601.01001"\ntags: [leakytag]\nwhy: "x"\n---\nbody')
     cfg = Config()
     fold = fold_roots([tmp_path], cfg)
-    # simulate the gate bug the audit exists to catch: a profile built WITH the stub
-    poisoned = fold_roots([tmp_path], cfg)
-    for n in poisoned.papers:
-        if n.status == "staged":
-            n.touched = True
-    profile = build_profile(poisoned, cfg, TODAY)
-    violations = staged_audit(fold, profile)
-    assert any("leaked" in v and "seededstub" in v for v in violations)
+    from arjev.fold import PaperNote
+
+    broken = PaperNote.contributes_taste
+    PaperNote.contributes_taste = property(lambda self: True)  # the gate bug
+    try:
+        violations = staged_audit(fold, cfg, TODAY)
+    finally:
+        PaperNote.contributes_taste = broken
+    assert any("staged gate leak" in v and "seededstub" in v for v in violations)
 
 
 def test_staged_audit_clean_on_fixture():
     fold = fold_roots([VAULT], Config())
-    profile = build_profile(fold, Config(), TODAY)
-    assert staged_audit(fold, profile) == [], "shared generic words must not false-positive"
+    assert staged_audit(fold, Config(), TODAY) == []

@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
-from .fold import FoldResult, PaperNote
+from .fold import FoldResult
 
 TAG_WEIGHT = 3.0
 BODY_WEIGHT = 1.0
@@ -91,24 +91,21 @@ def profile_flag(profile: Profile) -> str:
     return "profile-degraded" if profile.degraded else "ok"
 
 
-def _note_terms(note: PaperNote) -> set[str]:
-    return {t.lower() for t in note.tags} | set(_tokens(note.title)) | set(_tokens(note.body))
-
-
-def staged_audit(fold: FoldResult, profile: Profile) -> list[str]:
-    """The staged-gate fold self-audit (spec slice 5): no untouched staged note's terms
-    may appear in the current taste profile. A term the stub shares with a contributing
-    note is not a leak — the audit flags only terms no contributing note could have
-    produced (the strict overlap reading false-positives on shared generic words)."""
-    contributing = [p for p in fold.papers if p.contributes_taste]
-    producing: set[str] = set()
-    for p in contributing:
-        producing |= _note_terms(p)
-    violations = []
-    for note in fold.papers:
-        if note.contributes_taste:
-            continue
-        leaked = sorted(t for t in _note_terms(note) if profile.weight(t) > 0 and t not in producing)
-        if leaked:
-            violations.append(f"untouched staged note {note.file.name} leaked terms: {', '.join(leaked)}")
-    return violations
+def staged_audit(fold: FoldResult, cfg, now: date | None = None) -> list[str]:
+    """The staged-gate fold self-audit (spec slice 5): the gate holds iff the taste
+    profile built WITH untouched staged notes present equals the profile built
+    WITHOUT them. The equivalence form is exact — no shared-term false positives
+    (the strict-overlap reading flags every schema-discussing note), and it
+    detects a broken gate directly (a leaked stub's terms make the two differ)."""
+    now = now or date.today()
+    base = build_profile(fold, cfg, now)
+    untouched = [p for p in fold.papers if p.status == "staged" and not p.touched]
+    if not untouched:
+        return []
+    clean = FoldResult(papers=[p for p in fold.papers if p not in untouched], warnings=fold.warnings)
+    reference = build_profile(clean, cfg, now)
+    extra = {t for t, w in base.terms.items() if abs(reference.terms.get(t, 0.0) - w) > 1e-9}
+    if not extra:
+        return []
+    stub_names = ", ".join(p.file.name for p in untouched)
+    return [f"staged gate leak: terms {sorted(extra)} carry weight from untouched staged notes ({stub_names})"]

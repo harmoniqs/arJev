@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -46,6 +47,11 @@ def main(argv: list[str] | None = None) -> int:
     p_slack_sub = p_slack.add_subparsers(dest="slack_cmd", required=True)
     p_slack_sync = p_slack_sub.add_parser("sync", help="harvest reactions/replies → labels; auto-scaffold keeps")
     p_slack_sync.add_argument("--config", default=None)
+
+    p_cal = sub.add_parser("calibrate", help="replay joins → Brier, reliability, precision@5, probe lift")
+    p_cal.add_argument("--config", default=None)
+    p_cal.add_argument("--runs", type=int, default=30, help="journal window (last N runs)")
+    p_cal.add_argument("--json", action="store_true", help="machine-readable report")
 
     args = parser.parse_args(argv)
     if args.cmd == "init":
@@ -108,8 +114,18 @@ def main(argv: list[str] | None = None) -> int:
         new = labels_sync(cfg, fold_roots(cfg.expanded_roots, cfg), ledger, now=datetime.now())
         print(f"{len(new)} new label rows; ledger holds {len(ledger.rows())}")
         return 0
+    if args.cmd == "calibrate":
+        from arjev.calibrate import calibrate
+        from arjev.config import load_config
+        from arjev.fold import fold_roots
+
+        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        report = calibrate(cfg, fold_roots(cfg.expanded_roots, cfg), runs=args.runs)
+        import dataclasses
+
+        print(json.dumps(dataclasses.asdict(report), indent=2, sort_keys=True) if args.json else report.render())
+        return 0
     if args.cmd == "slack" and args.slack_cmd == "sync":
-        import json
         from datetime import date
 
         from arjev.config import load_config
@@ -152,8 +168,6 @@ def main(argv: list[str] | None = None) -> int:
 
 def _candidate_from_journal(arxiv: str, journal_file: Path):
     """The durable record feeds the scaffold — title + authors come from the journal."""
-    import json
-
     from arjev.fold import normalize_arxiv
     from arjev.keep import KeepCandidate
 
