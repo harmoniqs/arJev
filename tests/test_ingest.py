@@ -326,3 +326,37 @@ def test_enrichment_seam_appends_and_fails_open(monkeypatch, tmp_path):
     cfg.enrich_command = "exit 1"
     result = run_digest(cfg, feed_file=str(FIXTURES / "rss-quant-ph.xml"), today=TODAY_D, seed="s", enrich=True)
     assert "Today take:" not in result.markdown and result.picks, "a broken seam never breaks the digest"
+
+
+# ── title resolution: seeds carry real titles; the backfill repairs placeholders ─
+
+def test_backfill_titles_placeholder_only(monkeypatch, tmp_path):
+    """The human-invoked repair: notes whose title line is EXACTLY the placeholder
+    get real titles; human titles are never touched."""
+    papers = tmp_path / "papers"
+    papers.mkdir()
+    seeded = papers / "seed.md"
+    seeded.write_text('---\ntype: paper\narxiv: "2307.06617"\ntitle: "arXiv:2307.06617"\nstatus: staged\n---\n')
+    human = papers / "mine.md"
+    human.write_text('---\ntype: paper\narxiv: "2601.01001"\ntitle: "my own title"\n---\n')
+
+    from arjev import ingest as ingest_mod
+
+    monkeypatch.setattr(
+        ingest_mod, "fetch_titles",
+        lambda ids: {"2307.06617": "Quantum control of a cat-qubit with bit-flip times exceeding ten seconds"},
+    )
+    fixed = ingest_mod.backfill_titles(papers)
+    assert fixed == 1
+    assert "cat-qubit with bit-flip times" in seeded.read_text()
+    assert 'title: "my own title"' in human.read_text(), "never touch a human title"
+
+
+def test_slack_seed_resolves_real_titles(monkeypatch, tmp_path):
+    monkeypatch.setattr("arjev.ingest.fetch_titles",
+                        lambda ids: {"2608.31154": "A real paper title"})
+    messages = [{"user": "U094P57FQ87", "ts": "1790864954.46",
+                 "text": "look at https://arxiv.org/abs/2608.31154"}]
+    hits = ingest_slack_channel(_FakeSlack(messages), "C09HBLK3ECD", "papers",
+                                {"U094P57FQ87": "aaron"}, _cfg(tmp_path), TODAY_D)
+    assert hits[0].title == "A real paper title"
