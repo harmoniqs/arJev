@@ -164,7 +164,9 @@ def test_state_carries_taste_and_candidate():
     assembly = assemble_state(_profile_for(), _candidate())
     state = assembly.state
     assert "researcher_taste" in state and "candidate" in state
-    assert set(state["researcher_taste"]) == {"terms", "why_lines", "recent_titles"}
+    # no directives file on the fixture vault → the key is present but None
+    assert set(state["researcher_taste"]) == {"directives", "terms", "why_lines", "recent_titles"}
+    assert state["researcher_taste"]["directives"] is None
 
 
 # ── fail-open: the three paths ───────────────────────────────────────────────────
