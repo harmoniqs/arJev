@@ -37,10 +37,15 @@ class FakeTransport:
         self.calls.append(payload)
         if self.outage:
             raise ConnectionError("simulated outage")
-        question = payload["questions"][0]
-        if "must-read" in question["criteria"]:
-            return {"answers": [{"id": question["id"], "distribution": self.score_mass}], "model_version": "test-1.0"}
-        return {"answers": [{"id": question["id"], "distribution": self.noul_true}], "model_version": "test-1.0"}
+        # the contract of record: questions is a map, answers is a map
+        qid, question = next(iter(payload["questions"].items()))
+        assert payload["model"] == "jev-latest"
+        if question["type"] == "choice":
+            top = max(self.score_mass, key=self.score_mass.get)
+            answer = {"type": "choice", "choice": top, "confidence": self.score_mass[top],
+                      "probabilities": self.score_mass}
+            return {"model": "test-1.0", "answers": {qid: answer}}
+        return {"model": "test-1.0", "answers": {qid: {"type": "noul", "noul": self.noul_true["true"]}}}
 
 
 def client(transport, min_confidence=0.6):
@@ -69,6 +74,46 @@ def test_every_call_writes_a_canonical_receipt(monkeypatch, tmp_path):
         assert required <= set(row), "every receipt carries the canonical schema"
         assert row["candidate_arxiv"], "receipts are candidate-bound"
     assert {r["primitive"] for r in rows} == {"score", "noul"}
+
+
+def test_wire_contract_shape(monkeypatch, tmp_path):
+    """Issue #23 regression: the request body must match the contract of record —
+    /v1/systemone, model jev-latest, questions as a MAP, each with a type."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    from arjev.jev import DEFAULT_URL
+
+    transport = FakeTransport()
+    c = client(transport)
+    assert DEFAULT_URL == "https://api.typesafe.ai/v1/systemone"
+    receipts = []
+    state = {
+        "researcher_taste": {"terms": {"x": 1.0}},
+        "candidate": {"title": "t", "abstract": "a", "arxiv": "2601.01011"},
+    }
+    c.score_relevance(state, "2601.01011", "run-1", receipts)
+    payload = transport.calls[0]
+    assert payload["model"] == "jev-latest"
+    assert isinstance(payload["questions"], dict)
+    q = payload["questions"]["relevance"]
+    assert q["type"] == "choice"
+    assert "must-read" in q["criteria"]
+
+
+def test_jev_disabled_off_switch(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("ARJEV_JEV_KEY", "test-key")
+    monkeypatch.setenv("ARJEV_JEV_DISABLED", "1")
+    transport = FakeTransport()
+    c = client(transport)
+    assert not c.enabled
+    receipts = []
+    state = {
+        "researcher_taste": {"terms": {"x": 1.0}},
+        "candidate": {"title": "t", "abstract": "a", "arxiv": "2601.01011"},
+    }
+    answer = c.score_relevance(state, "2601.01011", "run-1", receipts)
+    assert not answer.ok and answer.fail_reason == "no-key"
+    assert transport.calls == []
 
 
 def test_receipt_without_candidate_id_is_refused(tmp_path):
@@ -159,10 +204,10 @@ def test_score_on_survivors_noul_on_nearmiss_and_probe(monkeypatch, tmp_path):
     isolate_state(monkeypatch, tmp_path)
     transport = FakeTransport()
     run_digest(digest_cfg(), feed_file=str(RSS), today=TODAY, seed="s", jev_client=client(transport))
-    scored = [q for p in transport.calls for q in p["questions"]]
+    questions = [q for p in transport.calls for q in p["questions"].values()]
     kinds = {"score": 0, "noul": 0}
-    for q in scored:
-        kinds["score" if "must-read" in q["criteria"] else "noul"] += 1
+    for q in questions:
+        kinds["score" if q["type"] == "choice" else "noul"] += 1
     assert kinds["score"] == 5  # fixture has 5 survivors in top-screen
     assert kinds["noul"] >= 1   # near-miss and/or probe members
 

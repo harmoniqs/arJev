@@ -46,19 +46,20 @@ def capture_jev(arxiv_id: str) -> None:
         "researcher_taste": {"terms": {"cat qubit": 1.0, "bias field": 0.8}},
         "recent_titles": ["synthetic recent title"],
     }
-    questions = [
-        {
-            "id": "relevance",
+    questions = {
+        "relevant": {
+            "type": "noul",
             "instructions": "Is this paper relevant to the researcher's taste digest?",
-            "criteria": {"relevant": "matches the taste digest", "irrelevant": "no overlap"},
+            "criteria": {"true": "matches the taste digest", "false": "no overlap"},
         }
-    ]
-    # The live wire shape per the confirmed contract; response is sanitized before landing.
+    }
+    # The contract of record (live-verified 2026-09-20): /v1/systemone, model in body,
+    # questions as a map; response is sanitized before landing.
     with httpx.Client(timeout=60) as client:
         r = client.post(
-            "https://api.typesafe.ai/v1/system-one",
+            "https://api.typesafe.ai/v1/systemone",
             headers={"authorization": f"Bearer {key}"},
-            json={"state": state, "questions": questions, "candidate": {"arxiv": arxiv_id}},
+            json={"model": "jev-latest", "state": state, "questions": questions},
         )
         r.raise_for_status()
         payload = r.json()

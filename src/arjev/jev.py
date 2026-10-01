@@ -3,9 +3,14 @@ confidence, on the pools the front line classified. Doctrine (spec-20260920-jev-
 integration): advisory-only, fail-open, never load-bearing. No key, outage, or low
 confidence → the lexical ranking, unchanged, and the journal says why.
 
-Wire contract (confirmed live, 2026-09-23): top-level `state`; each question carries
-`instructions` + `criteria` — option→rubric map for Choice, {true, false} for Noul,
-an ordered levels array (≤10) for Score; answers return as a probability distribution.
+Wire contract (the contract of record, live-verified 2026-09-20 against the vendor
+API — amicode #1311's jev_client.ts; arJev's first live run failed open on a guessed
+shape, issue #23): POST /v1/systemone, {"model": "jev-latest", "state": <object>,
+"questions": {"<id>": Question}}; Question = {"type": "choice"|"noul", "instructions":
+<str>, "criteria": <choice: option→rubric MAP | noul: {"true": …, "false": …}>};
+response = {"model": "jev-1.13.0", "answers": {"<id>": Answer}, "usage": {…}};
+choice answer = {"choice": <option>, "confidence": <float>, "probabilities": {…}};
+noul answer = {"noul": <float>} (p(true)).
 
 Receipts (canonical schema, normative): candidate arxiv id, run_id, ts, primitive,
 state_bytes, distribution, confidence, latency_ms, model_version — JSONL in the XDG
@@ -27,7 +32,8 @@ from .profile import Profile
 
 RELEVANCE_LEVELS = ["must-read", "worth-reading", "borderline", "unlikely", "irrelevant"]
 DEFAULT_MIN_CONFIDENCE = 0.6
-DEFAULT_URL = "https://api.typesafe.ai/v1/system-one"
+DEFAULT_URL = "https://api.typesafe.ai/v1/systemone"
+DEFAULT_MODEL = "jev-latest"
 
 Transport = Callable[[str, str, dict], dict]  # (url, key, payload) -> response json
 
@@ -59,16 +65,17 @@ class JevAnswer:
 
 class JevClient:
     def __init__(self, key: str | None, min_confidence: float = DEFAULT_MIN_CONFIDENCE, url: str = DEFAULT_URL,
-                 transport: Transport | None = None, timeout: float = 30.0) -> None:
-        self.key = key or os.environ.get("ARJEV_JEV_KEY")
+                 transport: Transport | None = None, timeout: float = 30.0, model: str = DEFAULT_MODEL) -> None:
+        self.key = key or os.environ.get("ARJEV_JEV_KEY") or _key_file()
         self.min_confidence = min_confidence
         self.url = url
+        self.model = model
         self.timeout = timeout
         self._transport = transport or self._http_transport
 
     @property
     def enabled(self) -> bool:
-        return bool(self.key)
+        return bool(self.key) and not _disabled()
 
     def _http_transport(self, url: str, key: str, payload: dict) -> dict:
         with httpx.Client(timeout=self.timeout, headers={"authorization": f"Bearer {key}"}) as client:
@@ -77,12 +84,15 @@ class JevClient:
             return r.json()
 
     def _ask(self, state: dict, question: dict) -> dict:
-        return self._transport(self.url, self.key, {"state": state, "questions": [question]})
+        # the contract of record: questions is a MAP keyed by id, and the model rides the body
+        return self._transport(self.url, self.key,
+                               {"model": self.model, "state": state, "questions": {question["id"]: question}})
 
     def score_relevance(self, state: dict, candidate_arxiv: str, run_id: str,
                         receipts: list[JevReceipt]) -> JevAnswer:
         question = {
             "id": "relevance",
+            "type": "choice",
             "instructions": "How relevant is this paper to the researcher's taste digest?",
             "criteria": {level: rubric for level, rubric in zip(
                 RELEVANCE_LEVELS,
@@ -102,6 +112,7 @@ class JevClient:
                       receipts: list[JevReceipt]) -> JevAnswer:
         question = {
             "id": "relevant",
+            "type": "noul",
             "instructions": "Is this paper relevant to the researcher's taste digest?",
             "criteria": {
                 "true": "there is meaningful overlap with the taste digest",
@@ -128,9 +139,9 @@ class JevClient:
             return JevAnswer(candidate_arxiv, primitive, {}, 0.0, payload_bytes, "none",
                              ok=False, fail_reason="outage")
         latency_ms = int((time.monotonic() - started) * 1000)
-        distribution = _first_distribution(response)
+        distribution = _answer_distribution(response, question["id"])
         confidence = max(distribution.values()) if distribution else 0.0
-        model_version = str(response.get("model_version", "unknown"))
+        model_version = str(response.get("model", "unknown"))
         receipts.append(JevReceipt(
             candidate_arxiv=candidate_arxiv, run_id=run_id, ts=_now(), primitive=primitive,
             state_bytes=payload_bytes, distribution=distribution, confidence=confidence,
@@ -146,12 +157,40 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def _first_distribution(response: dict) -> dict:
-    for q in response.get("answers", response.get("results", [])):
-        dist = q.get("distribution") or q.get("probabilities")
-        if isinstance(dist, dict):
-            return {str(k): float(v) for k, v in dist.items()}
+def _answer_distribution(response: dict, question_id: str) -> dict:
+    """Answers is a map keyed by id. A choice answer carries `probabilities`
+    (+ its top choice + confidence); a noul answer carries a p(true) float."""
+    answer = (response.get("answers") or {}).get(question_id)
+    if not isinstance(answer, dict):
+        return {}
+    if answer.get("type") == "noul":
+        p = float(answer.get("noul", 0.0))
+        return {"true": p, "false": 1.0 - p}
+    dist = answer.get("probabilities")
+    if isinstance(dist, dict):
+        return {str(k): float(v) for k, v in dist.items()}
     return {}
+
+
+def _key_file() -> str | None:
+    """ARJEV_JEV_KEY_FILE: an EXPLICIT opt-in key-file path, read at call time —
+    our ops points it at the server-side key (the amicode posture); a public
+    install without the env set never reads any file for a key."""
+    override = os.environ.get("ARJEV_JEV_KEY_FILE")
+    if not override:
+        return None
+    try:
+        key = Path(override).expanduser().read_text().strip()
+        return key or None
+    except OSError:
+        return None
+
+
+def _disabled() -> bool:
+    """ARJEV_JEV_DISABLED truthy disables the whole Jev path, zero behavioral delta
+    (the ops env-flag convention)."""
+    value = os.environ.get("ARJEV_JEV_DISABLED", "").strip().lower()
+    return value not in ("", "0", "false", "no", "off")
 
 
 # ── state assembly (the 4096 budget; spec: Jev state assembly) ────────────────────
