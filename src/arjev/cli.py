@@ -39,6 +39,14 @@ def main(argv: list[str] | None = None) -> int:
     p_fetch.add_argument("arxiv")
     p_fetch.add_argument("--config", default=None)
 
+    p_staged = sub.add_parser("staged", help="the prose worklist: kept notes awaiting a body (read-only)")
+    p_staged.add_argument("--config", default=None)
+
+    p_inspect = sub.add_parser(
+        "inspect", help="verify the config: checklist state + the fold's view (read-only)"
+    )
+    p_inspect.add_argument("--config", default=None)
+
     p_labels = sub.add_parser("labels", help="label ledger operations")
     p_labels_sub = p_labels.add_subparsers(dest="labels_cmd", required=True)
     p_labels_sync = p_labels_sub.add_parser("sync", help="vault-arrival join + checkbox harvest")
@@ -79,7 +87,11 @@ def main(argv: list[str] | None = None) -> int:
         from .init import init_config
 
         smoke = (args.smoke_feed_file, args.smoke_post) if args.smoke_feed_file else None
-        path = init_config(args.vault, Path(args.config).expanduser() if args.config else None, smoke)
+        try:
+            path = init_config(args.vault, Path(args.config).expanduser() if args.config else None, smoke)
+        except FileExistsError as exc:
+            print(f"{exc}", file=sys.stderr)
+            return 1
         print(f"config written: {path}")
         return 0
     if args.cmd == "digest":
@@ -122,6 +134,28 @@ def main(argv: list[str] | None = None) -> int:
         path = fetch_pdf(args.arxiv, Path(cfg.library_dir).expanduser())
         print(f"fetched: {path}")
         return 0
+    if args.cmd == "staged":
+        from arjev.config import load_config
+        from arjev.fold import fold_roots, staged_worklist
+        from arjev.ledger import LabelLedger
+
+        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        fold = fold_roots(cfg.expanded_roots, cfg)
+        kept_by = {r.arxiv_id: r.source for r in LabelLedger().rows() if r.label_type == "keep"}
+        for line in staged_worklist(fold, kept_by):
+            print(line)
+        return 0
+    if args.cmd == "inspect":
+        from .config import load_config
+        from .inspect import run_inspect
+
+        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        report = run_inspect(cfg)
+        for line in report.lines:
+            print(line)
+        for line in report.blocked:
+            print(line, file=sys.stderr)
+        return 1 if report.blocked else 0
     if args.cmd == "labels" and args.labels_cmd == "sync":
         from datetime import datetime
 

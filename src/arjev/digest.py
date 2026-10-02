@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from .config import Config
-from .feed import load_feed, load_feeds
+from .feed import arxiv_namespace, load_feed, load_feeds
 from .fold import fold_roots
 from .jev import JevClient, JevReceipt
 from .profile import build_profile, profile_flag
@@ -53,7 +53,7 @@ def _enrich(markdown: str, picks: list[Pick], mode: str, command: str) -> str:
     import subprocess
 
     payload = json.dumps(
-        {"mode": mode, "picks": canonical_picks(picks), "titles": {p.arxiv: p.title for p in picks}},
+        {"mode": mode, "picks": canonical_picks(picks), "titles": {p.identity.id: p.title for p in picks}},
         sort_keys=True,
     )
     try:
@@ -88,7 +88,16 @@ def run_digest(
     enrich: bool = False,
 ) -> DigestResult:
     today = today or date.today()
-    seed = seed or f"{feed or feed_file or 'quant-ph'}:{today.isoformat()}"
+    # a missing feed list is a config error, never a silent default-category digest
+    # (fail-open is for Jev seams only — issue #53)
+    if not (feed or feed_file or cfg.feeds):
+        raise SystemExit(
+            'feeds not configured — set feeds = ["<arXiv category>", …] in arjev.toml; '
+            "arJev ranks only what you configure and never defaults to a category"
+        )
+    # the seed fallback names the config slot, never a category — the configured
+    # feeds live in the journal's feed field, not in the seed (issue #53)
+    seed = seed or f"{feed or feed_file or 'feeds'}:{today.isoformat()}"
     fold = fold_roots(cfg.expanded_roots, cfg)
     profile = build_profile(fold, cfg, today)
     items = load_feed(feed, feed_file) if (feed or feed_file) else load_feeds(cfg.feeds)
@@ -111,11 +120,14 @@ def run_digest(
     if use_jev_first:
         from .score import score_item
 
-        skip = fold.arxiv_ids() | set(PostedState.load(state_dir() / "papers-digest-state.json").ids)
+        # the skip set is the vault's arxiv namespace (fold corpus + posted-state,
+        # both frozen bare-id schemas), lifted into identity pairs — the join namespace
+        skip = arxiv_namespace(fold.arxiv_ids()
+                               | set(PostedState.load(state_dir() / "papers-digest-state.json").ids))
         scored_by_id = {}
         for item in items:
-            if item.arxiv not in skip:
-                scored_by_id[item.arxiv] = score_item(item, profile)
+            if item.identity not in skip:
+                scored_by_id[item.identity] = score_item(item, profile)
         picks, mode_primary, candidates = apply_jev_first(
             items, scored_by_id, skip, client, profile, run_id, receipts,
             top=cfg.top, pace_s=cfg.jev_pace_s,
@@ -155,7 +167,8 @@ def run_digest(
             msg = render_pick_message(p, i + 1, len(picks), today, mode, cfg.why_style)
             ts = sc.post_message(cfg.slack_channel, msg.text)
             for c in record.candidates:
-                if c.arxiv == p.arxiv:
+                # the journal row carries the identity's id half only (frozen schema)
+                if c.arxiv == p.identity.id:
                     c.slack_ts = ts
                     break
 
@@ -170,7 +183,8 @@ def run_digest(
     # burned the day's picks and the real post would have shipped empty)
     if post in ("slack", "vault"):
         state_file = state_dir() / "papers-digest-state.json"
-        PostedState.load(state_file).append([p.arxiv for p in picks])
+        # posted ids persist the identity's id half (frozen state schema)
+        PostedState.load(state_file).append([p.identity.id for p in picks])
     write_journal(record)
 
     markdown = render_mrkdwn(picks, feed_name, total=len(items), today=today, mode=mode,

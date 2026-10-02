@@ -55,6 +55,8 @@ class PaperNote:
 class FoldResult:
     papers: list[PaperNote] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    scanned: int = 0  # every .md file examined under the roots (inspect's fold view)
+    type_matched: int = 0  # frontmatter type == the configured discriminator (advisory signal)
 
     def arxiv_ids(self) -> set[str]:
         return {p.arxiv for p in self.papers if p.arxiv}
@@ -170,12 +172,15 @@ def fold_roots(roots: list[Path], cfg) -> FoldResult:
         for path in sorted(root.glob(cfg.include)):
             if not path.is_file() or path.suffix != ".md":
                 continue
+            result.scanned += 1
             text = path.read_text(errors="replace")
             fm_body = _parse_frontmatter(text)
             if fm_body is None:
                 nonpaper_bodies.append(text)
                 continue
             fm, body = fm_body
+            if isinstance(fm.get("type"), str) and fm["type"].strip() == cfg.discriminator_type:
+                result.type_matched += 1
             identity, arxiv = _identity(fm, cfg.fields)
             if identity is None:
                 nonpaper_bodies.append(body)
@@ -192,6 +197,25 @@ def fold_roots(roots: list[Path], cfg) -> FoldResult:
         deduped.append(p)
     result.papers = deduped
     return result
+
+
+def staged_worklist(fold: FoldResult, kept_by: dict[str, str] | None = None) -> list[str]:
+    """The prose worklist (issue #56): one stable, greppable line per staged note —
+    id, title, kept-when, kept-by — and nothing else. Read-only by construction.
+    kept-when is the scaffold's own date (the ladder: read_date → date → mtime);
+    kept_by maps arxiv id → the keep row's source (the label ledger's provenance) —
+    an id without a keep row shows `-`. An empty worklist is an empty list, never
+    an error; the staged → written flip is an ordinary frontmatter edit, so a
+    written note simply stops matching here."""
+    kept_by = kept_by or {}
+    lines = []
+    for note in fold.papers:
+        if note.status != "staged":
+            continue
+        note_id = note.arxiv or note.identity
+        kept_when = note.read_date.isoformat() if note.read_date else "-"
+        lines.append(f"{note_id} | {note.title} | {kept_when} | {kept_by.get(note_id, '-')}")
+    return lines
 
 
 def _apply_wikilink_graph(result: FoldResult, nonpaper_bodies: list[str]) -> None:

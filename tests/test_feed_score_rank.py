@@ -30,6 +30,24 @@ def test_malformed_feed_degrades_to_empty():
     assert parse_arxiv_rss("") == []
 
 
+def test_load_feed_requires_a_category_or_a_file(monkeypatch):
+    """No default category at the fetch layer — absent category is a caller error,
+    never a silent fetch of someone else's field."""
+    import pytest
+
+    from arjev import feed as feed_mod
+    from arjev.feed import load_feed
+
+    def _no_network(*args, **kwargs):
+        raise AssertionError("load_feed must not fetch when no category and no file are given")
+
+    monkeypatch.setattr(feed_mod, "fetch_feed", _no_network)
+    with pytest.raises(ValueError, match="feed"):
+        load_feed()
+    # a file with no category stays legal (the fixture/CI path)
+    assert load_feed(feed_file=str(RSS))
+
+
 def test_entities_and_tags_stripped():
     items = parse_arxiv_rss(RSS.read_text())
     first = next(i for i in items if i.arxiv == "2601.01011")

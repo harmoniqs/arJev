@@ -31,7 +31,9 @@ class Config:
     discriminator_type: str = "paper"
     fields: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_FIELDS))
     half_life_days: float = 180.0
-    feeds: list[str] = field(default_factory=lambda: ["quant-ph"])
+    # field-neutral: no category is ever defaulted — a missing feeds list is a
+    # config error the digest names plainly (issue #53)
+    feeds: list[str] = field(default_factory=list)
     top: int = 5
     screen: int = 40
     probe_k: int = 20

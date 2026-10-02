@@ -3,9 +3,26 @@ vault-note sink, and the no-key fail-open path (acceptance metrics for slice 1).
 
 import os
 
+import pytest
+
 from arjev.digest import run_digest
 from arjev.init import init_config
 from conftest import RSS, TODAY, VAULT, digest_cfg, isolate_state
+
+
+def test_no_feeds_config_fails_digest_naming_the_slot(monkeypatch, tmp_path):
+    """Fail-loud over silent-default: a config with no feeds is a CONFIG error —
+    the digest names the missing slot and never ranks a default category."""
+    from arjev import feed as feed_mod
+
+    def _no_network(*args, **kwargs):
+        raise AssertionError("an empty-feeds config must fail before any fetch")
+
+    monkeypatch.setattr(feed_mod, "fetch_feed", _no_network)
+    isolate_state(monkeypatch, tmp_path)
+    cfg = digest_cfg()  # feeds == [] under field-neutral defaults
+    with pytest.raises(SystemExit, match="feeds"):
+        run_digest(cfg, today=TODAY)
 
 
 def test_fingerprint_deterministic_two_runs(monkeypatch, tmp_path):
@@ -28,8 +45,27 @@ def test_no_key_mode_is_lexical_only_ok(monkeypatch, tmp_path):
             os.environ["ARJEV_JEV_KEY"] = env_key
 
 
+def test_seed_fallback_carries_no_category(monkeypatch, tmp_path):
+    """Field-neutral seed: with no explicit feed/feed-file the seed fallback never
+    injects a category string — it names the config slot, not someone's field."""
+    import json
+
+    from arjev import feed as feed_mod
+
+    monkeypatch.setattr(feed_mod, "fetch_feed", lambda url, timeout=30.0: RSS.read_text())
+    isolate_state(monkeypatch, tmp_path)
+    cfg = digest_cfg()
+    cfg.feeds = ["quant-ph"]  # configured feeds are legitimate; the seed must not echo them
+    run_digest(cfg, today=TODAY)  # no seed, no feed, no feed_file → the fallback path
+    journal = tmp_path / "state" / "arjev" / "digest-journal.jsonl"
+    row = json.loads(journal.read_text().splitlines()[-1])
+    assert "quant-ph" not in row["seed"]
+    assert row["seed"].endswith(TODAY.isoformat()), "the seed stays date-stable"
+
+
 def test_init_bootstrap_produces_runnable_config(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    isolate_state(monkeypatch, tmp_path)
     path = init_config(str(VAULT), smoke=(str(RSS), "stdout"))
     assert path.is_file()
     assert "roots" in path.read_text()
