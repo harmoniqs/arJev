@@ -5,6 +5,8 @@ contract the runbook cites slot-by-slot)."""
 
 from __future__ import annotations
 
+import tomllib
+
 import pytest
 
 from arjev.init import init_config
@@ -27,3 +29,16 @@ def test_init_never_rewrites_existing_config(tmp_path):
     with pytest.raises(FileExistsError, match="never rewrites"):
         init_config(str(VAULT), config_path=path)
     assert path.read_text() == edited
+
+
+def test_feeds_slot_is_empty_and_points_at_the_taxonomy(tmp_path):
+    """The feeds decision starts EMPTY — arJev ranks only what you configure and
+    never defaults to a category; the comment names where the categories live.
+    Placement is part of the contract: feeds sits in [vault] where the loader
+    reads it (the key-placement lesson — a feeds line under [vault.fields] is
+    silently dead)."""
+    content = write_config(tmp_path)
+    assert "\nfeeds = []" in content, "the written feeds slot is empty"
+    vault = tomllib.loads(content)["vault"]
+    assert vault["feeds"] == []
+    assert "https://arxiv.org/category_taxonomy" in content, "the feeds comment points at the category taxonomy"

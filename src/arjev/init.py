@@ -16,6 +16,12 @@ TEMPLATE = """# arJev configuration — schema of record: config/specs/spec-2026
 roots = ["{roots}"]
 include = "**/*.md"
 type = "paper"
+half_life_days = 180.0
+# feeds — arXiv categories to rank; the full category list: https://arxiv.org/category_taxonomy
+feeds = []
+top = 5
+screen = 40
+probe_k = 20
 
 [vault.fields]
 identity = ["arxiv", "doi"]
@@ -24,15 +30,6 @@ rating = "rating"
 why = "why"
 tags = "tags"
 status = "status"
-
-# taste model
-half_life_days = 180.0
-
-# digest
-feeds = ["quant-ph"]
-top = 5
-screen = 40
-probe_k = 20
 
 # digest_dir = "/path/to/vault/digests"   # default: <first root>/digests
 # library_dir = "/path/to/pdf/library"    # used by `arjev fetch` (slice 3)
