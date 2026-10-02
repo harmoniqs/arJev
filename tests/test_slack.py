@@ -224,3 +224,18 @@ def _write_config(tmp_path, cfg):
         'keepers = ["U0000000SYN"]\n'
     )
     return str(path)
+
+
+def test_slack_post_opens_with_a_digest_header(monkeypatch, tmp_path):
+    """The channel showed five bare picks read as bot noise, not a digest — the
+    first message must announce the digest itself."""
+    isolate_state(monkeypatch, tmp_path)
+    fake = FakeSlack()
+    cfg = digest_cfg()
+    cfg.slack_channel = "C0000000SYN"
+    cfg.roots = [str(VAULT)]
+    result = run_digest(cfg, feed_file=str(RSS), today=TODAY, seed="s", post="slack", slack_client=fake.client())
+    first = fake.calls[0][1]["text"]
+    assert "arJev daily digest" in first and str(TODAY) in first
+    assert f"{len(result.picks)} picks" in first and "mode: lexical-only, ok" in first
+    assert len(fake.calls) == len(result.picks) + 1  # header + one per pick
