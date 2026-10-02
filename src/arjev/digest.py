@@ -88,7 +88,16 @@ def run_digest(
     enrich: bool = False,
 ) -> DigestResult:
     today = today or date.today()
-    seed = seed or f"{feed or feed_file or 'quant-ph'}:{today.isoformat()}"
+    # a missing feed list is a config error, never a silent default-category digest
+    # (fail-open is for Jev seams only — issue #53)
+    if not (feed or feed_file or cfg.feeds):
+        raise SystemExit(
+            'feeds not configured — set feeds = ["<arXiv category>", …] in arjev.toml; '
+            "arJev ranks only what you configure and never defaults to a category"
+        )
+    # the seed fallback names the config slot, never a category — the configured
+    # feeds live in the journal's feed field, not in the seed (issue #53)
+    seed = seed or f"{feed or feed_file or 'feeds'}:{today.isoformat()}"
     fold = fold_roots(cfg.expanded_roots, cfg)
     profile = build_profile(fold, cfg, today)
     items = load_feed(feed, feed_file) if (feed or feed_file) else load_feeds(cfg.feeds)
