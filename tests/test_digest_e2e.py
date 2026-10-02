@@ -65,6 +65,7 @@ def test_seed_fallback_carries_no_category(monkeypatch, tmp_path):
 
 def test_init_bootstrap_produces_runnable_config(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    isolate_state(monkeypatch, tmp_path)
     path = init_config(str(VAULT), smoke=(str(RSS), "stdout"))
     assert path.is_file()
     assert "roots" in path.read_text()
