@@ -11,19 +11,25 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from .feed import Identity
 from .jev import JevClient, JevReceipt, assemble_state, write_receipts
 from .rank import RankResult
 
 
 @dataclass
 class Pick:
-    arxiv: str
+    arxiv: str  # identity.id — persisted surfaces (fingerprint, render) keep the bare id
     title: str
     lexical_score: float
     terms: list[str]
     jev_primary: float  # top-2 relevance mass (survivors) or p_true (rescues)
     rescued: str | None  # None | "probe" | "near-miss"
     fail_reason: str | None
+    source: str = "arxiv"  # identity.source — the pair travels with the pick
+
+    @property
+    def identity(self) -> Identity:
+        return Identity(self.source, self.arxiv)
 
 
 @dataclass
@@ -85,7 +91,7 @@ def run_id_for(seed: str, today: date) -> str:
 def apply_jev_first(
     items: list,
     scored_by_id: dict,
-    skip_ids: set,
+    skip: set,
     client: JevClient,
     profile,
     run_id: str,
@@ -96,54 +102,63 @@ def apply_jev_first(
     """The ranking amendment: Jev at the front line. Every eligible item (not corpus,
     not posted) is Jev-scored; picks rank by top-two-level mass with lexical tiebreak.
     Per-item fail-open falls to the lexical order; the probe is moot (nothing
-    unscreened). Pools stay in the journal as lexical classifications."""
+    unscreened). Pools stay in the journal as lexical classifications. The join
+    inputs are identity-keyed: `skip` is the vault's arxiv namespace lifted into
+    pairs, `scored_by_id` maps identity pairs to scored items."""
     import time as _time
 
     mode_primary = "lexical-only"
     evaluated: list[Pick] = []
-    jev_of: dict[str, float] = {}
-    fail_reasons: dict[str, str] = {}
+    fail_reasons: dict[Identity, str] = {}
+    # receipt binding: the client appends at most one receipt per call — the pair
+    # association is made here, at the call, because the persisted receipt schema
+    # (candidate_arxiv, frozen) carries the identity's id half only
+    receipt_of: dict[Identity, JevReceipt | None] = {}
     for item in items:
-        arxiv = item.arxiv
-        if arxiv in skip_ids:
+        if item.identity in skip:
             continue
-        s = scored_by_id.get(arxiv)
+        s = scored_by_id.get(item.identity)
         if s is None:
             continue
         assembly = assemble_state(profile, s)
         if assembly.state is None:
-            fail_reasons[arxiv] = "state-overflow"
-            evaluated.append(Pick(arxiv, item.title, s.score, s.terms, 0.0, None, "state-overflow"))
+            fail_reasons[item.identity] = "state-overflow"
+            receipt_of[item.identity] = None
+            evaluated.append(Pick(item.identity.id, item.title, s.score, s.terms, 0.0, None, "state-overflow",
+                                  source=item.source))
             continue
-        answer = client.score_relevance(assembly.state, arxiv, run_id, receipts)
-        if pace_s and assembly is not None:
+        before = len(receipts)
+        answer = client.score_relevance(assembly.state, item.identity.id, run_id, receipts)
+        receipt_of[item.identity] = receipts[before] if len(receipts) > before else None
+        if pace_s:
             _time.sleep(pace_s)
         if answer.ok:
             mode_primary = "jev"
             mass = answer.distribution.get("must-read", 0.0) + answer.distribution.get("worth-reading", 0.0)
-            jev_of[arxiv] = mass
-            evaluated.append(Pick(arxiv, item.title, s.score, s.terms, mass, None, None))
+            evaluated.append(Pick(item.identity.id, item.title, s.score, s.terms, mass, None, None,
+                                  source=item.source))
         else:
-            fail_reasons[arxiv] = answer.fail_reason
-            evaluated.append(Pick(arxiv, item.title, s.score, s.terms, 0.0, None, answer.fail_reason))
-    evaluated.sort(key=lambda p: (-p.jev_primary, -p.lexical_score, p.arxiv))
+            fail_reasons[item.identity] = answer.fail_reason
+            evaluated.append(Pick(item.identity.id, item.title, s.score, s.terms, 0.0, None, answer.fail_reason,
+                                  source=item.source))
+    evaluated.sort(key=lambda p: (-p.jev_primary, -p.lexical_score, p.identity))
     picks = evaluated[:top]
-    picked_ids = {p.arxiv for p in picks}
+    picked = {p.identity for p in picks}
     # lexical pool labels stay in the journal as calibration denominators
     candidates = [
         CandidateJournal(
-            arxiv=p.arxiv, pool=_lexical_pool(p.arxiv, scored_by_id), lexical_score=p.lexical_score,
+            arxiv=p.identity.id, pool=_lexical_pool(p.identity, scored_by_id), lexical_score=p.lexical_score,
             terms=p.terms, jev=_jev_row_from_receipt(
-                next((r for r in receipts if r.candidate_arxiv == p.arxiv), None), fail_reasons.get(p.arxiv)),
-            posted=p.arxiv in picked_ids, rescued=None, title=p.title, authors=[],
+                receipt_of.get(p.identity), fail_reasons.get(p.identity)),
+            posted=p.identity in picked, rescued=None, title=p.title, authors=[],
         )
         for p in evaluated
     ]
     return picks, mode_primary, candidates
 
 
-def _lexical_pool(arxiv: str, scored_by_id: dict) -> str:
-    s = scored_by_id.get(arxiv)
+def _lexical_pool(identity: Identity, scored_by_id: dict) -> str:
+    s = scored_by_id.get(identity)
     if s is None:
         return "none"
     if s.score > 0:
@@ -154,7 +169,9 @@ def _lexical_pool(arxiv: str, scored_by_id: dict) -> str:
 def apply_jev(rank: RankResult, client: JevClient, profile, run_id: str, receipts: list[JevReceipt],
               top: int) -> tuple[list[Pick], str, list[CandidateJournal]]:
     """Rerank survivors (Score), rescue near-miss and probe items (Noul). Returns
-    (picks, primary_mode, candidate journal rows). Fail-open per item, journaled."""
+    (picks, primary_mode, candidate journal rows). Fail-open per item, journaled.
+    Every join — pool membership, posted flags, rescues, receipts — routes through
+    the identity pair; journal rows persist the pair's id half (frozen schema)."""
     mode_primary = "lexical-only"
     candidates: list[CandidateJournal] = []
     evaluated: list[Pick] = []
@@ -162,67 +179,79 @@ def apply_jev(rank: RankResult, client: JevClient, profile, run_id: str, receipt
     # fallback); near-miss/probe items enter the picks ONLY on a successful rescue —
     # a failed-open zero-score band item falls out entirely (the live dry-run caught
     # the opposite: they silently took pick slots under an empty profile).
-    fail_reasons: dict[str, str] = {}
+    fail_reasons: dict[Identity, str] = {}
+    # receipt binding by observation: the client appends at most one receipt per
+    # call — the pair association is made at the call, since the persisted receipt
+    # schema (candidate_arxiv, frozen) carries the identity's id half only
+    receipt_of: dict[Identity, JevReceipt | None] = {}
 
     for s in rank.pools.survivors:
+        before = len(receipts)
         answer = _score_or_fail(client, profile, s, run_id, receipts)
+        receipt_of[s.item.identity] = receipts[before] if len(receipts) > before else None
         if answer is None:
-            evaluated.append(Pick(s.item.arxiv, s.item.title, s.score, s.terms, 0.0, None, "state-overflow"))
-            fail_reasons[s.item.arxiv] = "state-overflow"
+            evaluated.append(Pick(s.item.identity.id, s.item.title, s.score, s.terms, 0.0, None,
+                                  "state-overflow", source=s.item.source))
+            fail_reasons[s.item.identity] = "state-overflow"
             continue
         if answer.ok:
             mode_primary = "jev"
             mass = answer.distribution.get("must-read", 0.0) + answer.distribution.get("worth-reading", 0.0)
-            evaluated.append(Pick(s.item.arxiv, s.item.title, s.score, s.terms, mass, None, None))
+            evaluated.append(Pick(s.item.identity.id, s.item.title, s.score, s.terms, mass, None, None,
+                                  source=s.item.source))
         else:
-            evaluated.append(Pick(s.item.arxiv, s.item.title, s.score, s.terms, 0.0, None, answer.fail_reason))
-            fail_reasons[s.item.arxiv] = answer.fail_reason
+            evaluated.append(Pick(s.item.identity.id, s.item.title, s.score, s.terms, 0.0, None,
+                                  answer.fail_reason, source=s.item.source))
+            fail_reasons[s.item.identity] = answer.fail_reason
 
     for pool_name, source in (("near-miss", rank.pools.near_miss), ("probe", rank.pools.probe)):
         for s in source:
+            before = len(receipts)
             answer = _noul_or_fail(client, profile, s, run_id, receipts)
+            receipt_of[s.item.identity] = receipts[before] if len(receipts) > before else None
             if answer is None:
-                fail_reasons[s.item.arxiv] = "state-overflow"
+                fail_reasons[s.item.identity] = "state-overflow"
                 continue
             if not answer.ok:
-                fail_reasons[s.item.arxiv] = answer.fail_reason
+                fail_reasons[s.item.identity] = answer.fail_reason
                 continue
             if answer.distribution.get("true", 0.0) >= client.min_confidence:
                 mode_primary = "jev"
-                evaluated.append(Pick(s.item.arxiv, s.item.title, s.score, s.terms,
-                                      answer.distribution.get("true", 0.0), pool_name, None))
+                evaluated.append(Pick(s.item.identity.id, s.item.title, s.score, s.terms,
+                                      answer.distribution.get("true", 0.0), pool_name, None,
+                                      source=s.item.source))
             else:
-                fail_reasons[s.item.arxiv] = "below-threshold"
+                fail_reasons[s.item.identity] = "below-threshold"
 
-    evaluated.sort(key=lambda p: (-p.jev_primary, -p.lexical_score, p.arxiv))
+    evaluated.sort(key=lambda p: (-p.jev_primary, -p.lexical_score, p.identity))
     picks = evaluated[:top]
-    picked_ids = {p.arxiv for p in picks}
+    picked = {p.identity for p in picks}
 
-    pool_of = {}
+    pool_of: dict[Identity, str] = {}
     for s in rank.pools.survivors:
-        pool_of[s.item.arxiv] = "survivor"
+        pool_of[s.item.identity] = "survivor"
     for s in rank.pools.near_miss:
-        pool_of[s.item.arxiv] = "near-miss"
+        pool_of[s.item.identity] = "near-miss"
     for s in rank.pools.probe:
-        pool_of[s.item.arxiv] = "probe"
+        pool_of[s.item.identity] = "probe"
     pools_all = (rank.pools.survivors, rank.pools.near_miss, rank.pools.probe)
     for s in pools_all[0] + pools_all[1] + pools_all[2]:
-        receipt = next((r for r in receipts if r.candidate_arxiv == s.item.arxiv), None)
         candidates.append(CandidateJournal(
-            arxiv=s.item.arxiv, pool=pool_of[s.item.arxiv],
+            arxiv=s.item.identity.id, pool=pool_of[s.item.identity],
             lexical_score=s.score, terms=s.terms,
-            jev=_jev_row_from_receipt(receipt, fail_reasons.get(s.item.arxiv)),
-            posted=s.item.arxiv in picked_ids,
-            rescued=next((p.rescued for p in picks if p.arxiv == s.item.arxiv), None),
+            jev=_jev_row_from_receipt(receipt_of.get(s.item.identity), fail_reasons.get(s.item.identity)),
+            posted=s.item.identity in picked,
+            rescued=next((p.rescued for p in picks if p.identity == s.item.identity), None),
             title=s.item.title, authors=list(s.item.authors),
         ))
     # zero-score non-probe items ride the journal too (the calibration denominator pool)
-    probe_ids = {s.item.arxiv for s in rank.pools.probe}
-    for s in rank.dropped_zero:
-        if s in probe_ids:
+    probe_ids = {s.item.identity for s in rank.pools.probe}
+    for identity in rank.dropped_zero:
+        if identity in probe_ids:
             continue
         candidates.append(
-            CandidateJournal(arxiv=s, pool="none", lexical_score=0.0, terms=[], jev=None, posted=False, rescued=None)
+            CandidateJournal(arxiv=identity.id, pool="none", lexical_score=0.0, terms=[], jev=None,
+                             posted=False, rescued=None)
         )
     return picks, mode_primary, candidates
 
@@ -244,14 +273,14 @@ def _score_or_fail(client, profile, s, run_id, receipts):
     assembly = assemble_state(profile, s)
     if assembly.state is None:
         return None
-    return client.score_relevance(assembly.state, s.item.arxiv, run_id, receipts)
+    return client.score_relevance(assembly.state, s.item.identity.id, run_id, receipts)
 
 
 def _noul_or_fail(client, profile, s, run_id, receipts):
     assembly = assemble_state(profile, s)
     if assembly.state is None:
         return None
-    return client.noul_relevant(assembly.state, s.item.arxiv, run_id, receipts)
+    return client.noul_relevant(assembly.state, s.item.identity.id, run_id, receipts)
 
 
 def write_journal(record: RunRecord) -> Path:

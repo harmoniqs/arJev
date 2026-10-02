@@ -16,11 +16,19 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from .feed import ARXIV, Identity
 from .fold import FoldResult
 from .ledger import Label, LabelLedger, now_ts
 from .state import PostedState
 
 CLOCK_DAYS = 30
+
+
+def _vault_pair(identity: str) -> Identity:
+    """The fold's source-prefixed identity ("arxiv:2601.01001", "doi:10.…" — the
+    vault-side anchor, unchanged) split into the (source, id) join pair."""
+    source, _, id = identity.partition(":")
+    return Identity(source, id)
 
 
 def arrival_labels(
@@ -32,33 +40,35 @@ def arrival_labels(
     days: int = CLOCK_DAYS,
 ) -> list[Label]:
     """The vault-arrival join. Reads fold + journal + posted-state; writes only the
-    ledger. Idempotent (the ledger dedupes on (arxiv_id, label_type))."""
-    postings: dict[str, str | None] = {}
+    ledger. Idempotent (the ledger dedupes on (arxiv_id, label_type)). The join
+    routes on identity pairs: journal rows and posted-state are the arxiv namespace
+    (frozen bare-id schemas); the fold carries source-prefixed anchors."""
+    postings: dict[Identity, str | None] = {}
     for line in journal:
         for c in line.get("candidates", []):
             if c.get("posted"):
-                postings.setdefault(c["arxiv"], line.get("ts"))
+                postings.setdefault(Identity(ARXIV, c["arxiv"]), line.get("ts"))
     new: list[Label] = []
-    for arxiv in posted.ids:
-        if arxiv not in postings:
-            postings[arxiv] = posted.posting_time(arxiv, None)  # legacy: state `updated`, in memory
-    staged_ids = {p.arxiv for p in fold.papers if p.arxiv and p.status == "staged"}
-    distilled_ids = {p.arxiv for p in fold.papers if p.arxiv and p.status != "staged"}
-    for arxiv, posted_ts in postings.items():
-        if arxiv in distilled_ids:
-            if not ledger.has(arxiv, "saved-implicit") and not ledger.has_positive(arxiv):
-                new.append(Label(arxiv, "saved-implicit", "vault-arrival", now_ts()))
+    for arxiv_id in posted.ids:
+        if Identity(ARXIV, arxiv_id) not in postings:
+            postings[Identity(ARXIV, arxiv_id)] = posted.posting_time(arxiv_id, None)  # legacy: state `updated`
+    staged = {_vault_pair(p.identity) for p in fold.papers if p.status == "staged"}
+    distilled = {_vault_pair(p.identity) for p in fold.papers if p.status != "staged"}
+    for identity, posted_ts in postings.items():
+        if identity in distilled:
+            if not ledger.has(identity.id, "saved-implicit") and not ledger.has_positive(identity.id):
+                new.append(Label(identity.id, "saved-implicit", "vault-arrival", now_ts()))
             continue
-        if arxiv in staged_ids:
+        if identity in staged:
             continue  # the clock is suspended while any staged stub exists — kept never flips negative
-        if posted_ts is None or ledger.has_positive(arxiv):
+        if posted_ts is None or ledger.has_positive(identity.id):
             continue
         try:
             posted_at = datetime.fromisoformat(posted_ts.replace("Z", "+00:00"))
         except ValueError:
             continue
         if now - posted_at >= timedelta(days=days):
-            new.append(Label(arxiv, "unsaved-weak-negative", "vault-unsaved", now_ts()))
+            new.append(Label(identity.id, "unsaved-weak-negative", "vault-unsaved", now_ts()))
     ledger.append_many(new)
     return new
 

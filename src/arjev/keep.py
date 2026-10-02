@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+from .feed import ARXIV, Identity
 from .ledger import Label, LabelLedger, now_ts
 
 DEFAULT_TEMPLATE = """---
@@ -30,12 +31,24 @@ Scaffolded by arjev on {today} from the daily digest — fill `rating` and `why`
 to promote this note from staged (it contributes zero taste until then).
 """
 
+# the fetch path is arXiv-only: both id forms the RSS grammar produces, vN allowed
+_ARXIV_FETCH_FORM = re.compile(r"^([0-9]{4}\.[0-9]{4,5}|[a-z-]+/\d{7})(v\d+)?$", re.IGNORECASE)
+
 
 @dataclass
 class KeepCandidate:
     arxiv: str
     title: str
     authors: list[str]
+    source: str = ARXIV  # identity.source — the half a future source adapter fills
+
+    def __post_init__(self) -> None:
+        # normalize-at-parse: the pair is normalized where the candidate is born
+        self.source = self.source.strip().lower()
+
+    @property
+    def identity(self) -> Identity:
+        return Identity(self.source, self.arxiv)
 
 
 def _slugify(title: str, limit: int = 40) -> str:
@@ -50,7 +63,9 @@ def load_template(cfg) -> str:
 
 
 def find_note_for_id(papers_dir: Path, arxiv: str) -> Path | None:
-    """The note that already owns this id, if any (the seed's never-edit guard)."""
+    """The note that already owns this id, if any (the seed's never-edit guard).
+    `arxiv` is a vault-side bare id — both sides of this compare live in the
+    arxiv namespace of the identity pair."""
     for existing in papers_dir.glob("*.md"):
         if _identity_of(existing.read_text(errors="replace")) == arxiv:
             return existing
@@ -58,18 +73,21 @@ def find_note_for_id(papers_dir: Path, arxiv: str) -> Path | None:
 
 
 def scaffold_note(candidate: KeepCandidate, cfg, today: date, papers_dir: Path | None = None) -> Path:
-    """Write the staged stub. Idempotent: an existing note for the id is returned as-is
-    (never edit an existing note — obligation: write safety)."""
+    """Write the staged stub. Idempotent: an existing note for the identity is
+    returned as-is (never edit an existing note — obligation: write safety)."""
     papers_dir = papers_dir or _papers_dir(cfg)
     target = papers_dir / f"paper-{today:%Y%m%d}-{_slugify(candidate.title)}.md"
     if target.exists():
         return target
     for existing in papers_dir.glob("*.md"):
-        if _identity_of(existing.read_text(errors="replace")) == candidate.arxiv:
-            return existing  # a note already owns this id — never a second one
+        # the vault note's `arxiv:` field is the arxiv namespace — join on the pair:
+        # a same-id candidate from a different source is a different paper
+        note_id = _identity_of(existing.read_text(errors="replace"))
+        if note_id and Identity(ARXIV, note_id) == candidate.identity:
+            return existing  # a note already owns this identity — never a second one
     authors_yaml = ", ".join(f'"{a}"' for a in candidate.authors)
     content = load_template(cfg).format(
-        arxiv=candidate.arxiv,
+        arxiv=candidate.identity.id,  # the stub's `arxiv:` field persists the identity's id half
         title=candidate.title.replace('"', "'"),
         authors_yaml=authors_yaml,
         today=today.isoformat(),
@@ -100,13 +118,18 @@ def _identity_of(text: str) -> str | None:
 def keep(candidate: KeepCandidate, ledger: LabelLedger, cfg, today: date) -> Path:
     """The keep gesture: one label row, one stub. Idempotent on both."""
     scaffold_note(candidate, cfg, today)
-    ledger.append(Label(arxiv_id=candidate.arxiv, label_type="keep", source="cli-keep", ts=now_ts()))
+    # the ledger row persists the identity's id half (frozen schema)
+    ledger.append(Label(arxiv_id=candidate.identity.id, label_type="keep", source="cli-keep", ts=now_ts()))
     return _papers_dir(cfg) / f"paper-{today:%Y%m%d}-{_slugify(candidate.title)}.md"
 
 
 def fetch_pdf(arxiv: str, library_dir: Path, fetcher: Callable[[str], bytes] | None = None) -> Path:
     """Download the arXiv PDF into the content-addressed library (the acquisition
-    half of the record↔PDF join). The fetcher seam keeps CI offline."""
+    half of the record↔PDF join). The fetcher seam keeps CI offline. The fetch
+    path is arXiv-only and errors loudly on anything else — a future source
+    adapter owns its own fetcher and never rides this one silently."""
+    if not _ARXIV_FETCH_FORM.match(arxiv.strip()):
+        raise ValueError(f"fetch is arXiv-only — {arxiv!r} is not an arXiv id (source adapters own their fetchers)")
     library_dir.mkdir(parents=True, exist_ok=True)
     target = library_dir / f"arxiv-{arxiv}.pdf"
     if target.exists():
