@@ -152,7 +152,7 @@ def run_digest(
             f"{len(items)} new items ranked against the lab vault",
         )
         for i, p in enumerate(picks):
-            msg = render_pick_message(p, i + 1, len(picks), today, feed_name, mode, cfg.why_style)
+            msg = render_pick_message(p, i + 1, len(picks), today, mode, cfg.why_style)
             ts = sc.post_message(cfg.slack_channel, msg.text)
             for c in record.candidates:
                 if c.arxiv == p.arxiv:

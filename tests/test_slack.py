@@ -104,7 +104,7 @@ class _Pick:
 
 
 def test_content_boundary_terms_mode():
-    msg = render_pick_message(_Pick(), 1, 5, TODAY, "quant-ph", "mode: jev, ok", "terms")
+    msg = render_pick_message(_Pick(), 1, 5, TODAY, "mode: jev, ok", "terms")
     assert "randomized" in msg.text and "arxiv.org/abs/2601.01011" in msg.text
     assert "/" not in str(VAULT) or str(VAULT) not in msg.text  # no vault paths
     assert ".md" not in msg.text  # no note filenames
@@ -112,12 +112,12 @@ def test_content_boundary_terms_mode():
 
 
 def test_content_boundary_opaque_mode():
-    msg = render_pick_message(_Pick(), 1, 5, TODAY, "quant-ph", "mode: jev, ok", "opaque")
+    msg = render_pick_message(_Pick(), 1, 5, TODAY, "mode: jev, ok", "opaque")
     assert "randomized" not in msg.text and "profile match" in msg.text
 
 
 def test_content_boundary_none_mode():
-    msg = render_pick_message(_Pick(), 1, 5, TODAY, "quant-ph", "mode: jev, ok", "none")
+    msg = render_pick_message(_Pick(), 1, 5, TODAY, "mode: jev, ok", "none")
     assert "randomized" not in msg.text and "profile match" not in msg.text
 
 
@@ -125,7 +125,7 @@ def test_probe_rescue_why_line_in_slack():
     pick = _Pick()
     pick.rescued = "probe"
     pick.terms = []
-    msg = render_pick_message(pick, 1, 5, TODAY, "quant-ph", "mode: jev, ok", "none")
+    msg = render_pick_message(pick, 1, 5, TODAY, "mode: jev, ok", "none")
     assert "rescued by probe" in msg.text and f"p={pick.jev_primary:.2f}" in msg.text
 
 

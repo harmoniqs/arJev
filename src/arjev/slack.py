@@ -79,9 +79,11 @@ class SlackPost:
     arxiv: str
 
 
-def render_pick_message(pick, index: int, total: int, today, feed_name: str, mode: str, why_style: str) -> SlackPost:
+def render_pick_message(pick, index: int, total: int, today, mode: str, why_style: str) -> SlackPost:
     title = latex_to_unicode(pick.title)
-    lines = [f"*arXiv {feed_name} pick {index}/{total} for {today.isoformat()}* — {mode}",
+    # the digest header names the feeds; pick headers stay link-free (Slack
+    # linkifies raw "quant-ph+cond-mat..." strings into fake URLs)
+    lines = [f"*arJev pick {index}/{total} for {today.isoformat()}* — {mode}",
              f"<http://arxiv.org/abs/{pick.arxiv}|{title}>"]
     if why_style == "terms":
         shown = ", ".join(f"`{t}`" for t in pick.terms[:5])
