@@ -42,3 +42,10 @@ def test_feeds_slot_is_empty_and_points_at_the_taxonomy(tmp_path):
     vault = tomllib.loads(content)["vault"]
     assert vault["feeds"] == []
     assert "https://arxiv.org/category_taxonomy" in content, "the feeds comment points at the category taxonomy"
+
+
+def test_no_lab_name_anywhere_in_the_template(tmp_path):
+    """Field-neutral means field-neutral: the template presumes no lab, no schema
+    owner — a researcher in any arXiv-served field reads it as theirs."""
+    content = write_config(tmp_path)
+    assert "harmoniqs" not in content.lower(), "zero lab names in the template"
