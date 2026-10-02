@@ -39,6 +39,9 @@ def main(argv: list[str] | None = None) -> int:
     p_fetch.add_argument("arxiv")
     p_fetch.add_argument("--config", default=None)
 
+    p_staged = sub.add_parser("staged", help="the prose worklist: kept notes awaiting a body (read-only)")
+    p_staged.add_argument("--config", default=None)
+
     p_labels = sub.add_parser("labels", help="label ledger operations")
     p_labels_sub = p_labels.add_subparsers(dest="labels_cmd", required=True)
     p_labels_sync = p_labels_sub.add_parser("sync", help="vault-arrival join + checkbox harvest")
@@ -121,6 +124,17 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         path = fetch_pdf(args.arxiv, Path(cfg.library_dir).expanduser())
         print(f"fetched: {path}")
+        return 0
+    if args.cmd == "staged":
+        from arjev.config import load_config
+        from arjev.fold import fold_roots, staged_worklist
+        from arjev.ledger import LabelLedger
+
+        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        fold = fold_roots(cfg.expanded_roots, cfg)
+        kept_by = {r.arxiv_id: r.source for r in LabelLedger().rows() if r.label_type == "keep"}
+        for line in staged_worklist(fold, kept_by):
+            print(line)
         return 0
     if args.cmd == "labels" and args.labels_cmd == "sync":
         from datetime import datetime
