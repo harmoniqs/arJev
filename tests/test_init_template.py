@@ -5,12 +5,20 @@ contract the runbook cites slot-by-slot)."""
 
 from __future__ import annotations
 
+import re
 import tomllib
 
 import pytest
 
 from arjev.init import init_config
 from conftest import RSS, VAULT
+
+# every decision slot the checklist-file must carry (the runbook cites these slot-by-slot)
+DECISION_SLOTS = [
+    "roots", "include", "type", "half_life_days", "feeds", "top", "screen", "probe_k",
+    "directives_path", "identity", "read_date", "rating", "why", "tags", "status",
+    "digest_dir", "library_dir",
+]
 
 
 def write_config(tmp_path) -> "object":
@@ -49,3 +57,35 @@ def test_no_lab_name_anywhere_in_the_template(tmp_path):
     owner — a researcher in any arXiv-served field reads it as theirs."""
     content = write_config(tmp_path)
     assert "harmoniqs" not in content.lower(), "zero lab names in the template"
+
+
+def _slot_lines(content: str) -> list[tuple[str, int]]:
+    """(key, line index) for every decision-slot line — an active assignment or a
+    commented optional slot. Example-block lines are indented past `# ` and so
+    never match; table headers and prose comments carry no `= ` after a bare key."""
+    return [
+        (m.group(1), i)
+        for i, line in enumerate(content.splitlines())
+        if (m := re.fullmatch(r"(?:# )?([a-z_]+) = .*", line))
+    ]
+
+
+def test_every_decision_slot_is_present(tmp_path):
+    content = write_config(tmp_path)
+    keys = {key for key, _ in _slot_lines(content)}
+    assert keys, "the template carries decision slots"
+    for slot in DECISION_SLOTS:
+        assert slot in keys, f"decision slot {slot} is missing from the checklist-file"
+
+
+def test_every_slot_carries_a_one_line_comment_naming_it_exactly(tmp_path):
+    """The comment structure is a contract: each slot's explanation sits on the one
+    line directly above it, and its first token is the config key — exactly. The
+    runbook cites slots by name, so a comment naming `arxiv id field` for the key
+    `identity` would break the citation."""
+    content = write_config(tmp_path)
+    lines = content.splitlines()
+    for key, i in _slot_lines(content):
+        assert lines[i - 1].startswith(f"# {key} "), (
+            f"slot {key} must be preceded by a one-line comment naming it exactly (line {i + 1})"
+        )
