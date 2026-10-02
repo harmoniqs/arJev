@@ -55,6 +55,8 @@ class PaperNote:
 class FoldResult:
     papers: list[PaperNote] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    scanned: int = 0  # every .md file examined under the roots (inspect's fold view)
+    type_matched: int = 0  # frontmatter type == the configured discriminator (advisory signal)
 
     def arxiv_ids(self) -> set[str]:
         return {p.arxiv for p in self.papers if p.arxiv}
@@ -170,12 +172,15 @@ def fold_roots(roots: list[Path], cfg) -> FoldResult:
         for path in sorted(root.glob(cfg.include)):
             if not path.is_file() or path.suffix != ".md":
                 continue
+            result.scanned += 1
             text = path.read_text(errors="replace")
             fm_body = _parse_frontmatter(text)
             if fm_body is None:
                 nonpaper_bodies.append(text)
                 continue
             fm, body = fm_body
+            if isinstance(fm.get("type"), str) and fm["type"].strip() == cfg.discriminator_type:
+                result.type_matched += 1
             identity, arxiv = _identity(fm, cfg.fields)
             if identity is None:
                 nonpaper_bodies.append(body)

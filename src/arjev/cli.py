@@ -42,6 +42,11 @@ def main(argv: list[str] | None = None) -> int:
     p_staged = sub.add_parser("staged", help="the prose worklist: kept notes awaiting a body (read-only)")
     p_staged.add_argument("--config", default=None)
 
+    p_inspect = sub.add_parser(
+        "inspect", help="verify the config: checklist state + the fold's view (read-only)"
+    )
+    p_inspect.add_argument("--config", default=None)
+
     p_labels = sub.add_parser("labels", help="label ledger operations")
     p_labels_sub = p_labels.add_subparsers(dest="labels_cmd", required=True)
     p_labels_sync = p_labels_sub.add_parser("sync", help="vault-arrival join + checkbox harvest")
@@ -140,6 +145,17 @@ def main(argv: list[str] | None = None) -> int:
         for line in staged_worklist(fold, kept_by):
             print(line)
         return 0
+    if args.cmd == "inspect":
+        from .config import load_config
+        from .inspect import run_inspect
+
+        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        report = run_inspect(cfg)
+        for line in report.lines:
+            print(line)
+        for line in report.blocked:
+            print(line, file=sys.stderr)
+        return 1 if report.blocked else 0
     if args.cmd == "labels" and args.labels_cmd == "sync":
         from datetime import datetime
 
