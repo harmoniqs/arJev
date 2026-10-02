@@ -171,9 +171,9 @@ def test_digest_posts_each_pick_and_journals_ts(monkeypatch, tmp_path):
     cfg2.slack_channel = "C0000000SYN"
     cfg2.papers_dir = str(tmp_path / "papers")
     result = run_digest(cfg2, feed_file=str(RSS), today=TODAY, seed="s", post="slack", slack_client=fake.client())
-    assert len(fake.calls) == len(result.picks)  # each pick is its own message
+    assert len(fake.calls) == len(result.picks) + 1  # the header + one per pick
     texts = [p["text"] for _, p in fake.calls]
-    assert all("arxiv.org/abs/" in t for t in texts)
+    assert all("arxiv.org/abs/" in t for t in texts[1:])  # the header carries no link
     # the journal carries (arxiv, slack_ts) pairs — the sync's join key
     from arjev.rerank import journal_path
 
