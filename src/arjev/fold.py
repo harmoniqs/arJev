@@ -194,6 +194,25 @@ def fold_roots(roots: list[Path], cfg) -> FoldResult:
     return result
 
 
+def staged_worklist(fold: FoldResult, kept_by: dict[str, str] | None = None) -> list[str]:
+    """The prose worklist (issue #56): one stable, greppable line per staged note —
+    id, title, kept-when, kept-by — and nothing else. Read-only by construction.
+    kept-when is the scaffold's own date (the ladder: read_date → date → mtime);
+    kept_by maps arxiv id → the keep row's source (the label ledger's provenance) —
+    an id without a keep row shows `-`. An empty worklist is an empty list, never
+    an error; the staged → written flip is an ordinary frontmatter edit, so a
+    written note simply stops matching here."""
+    kept_by = kept_by or {}
+    lines = []
+    for note in fold.papers:
+        if note.status != "staged":
+            continue
+        note_id = note.arxiv or note.identity
+        kept_when = note.read_date.isoformat() if note.read_date else "-"
+        lines.append(f"{note_id} | {note.title} | {kept_when} | {kept_by.get(note_id, '-')}")
+    return lines
+
+
 def _apply_wikilink_graph(result: FoldResult, nonpaper_bodies: list[str]) -> None:
     by_basename = {p.basename: p for p in result.papers}
     for body in nonpaper_bodies:
