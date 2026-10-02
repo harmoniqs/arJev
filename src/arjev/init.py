@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .config import Config, default_config_path
+from .config import default_config_path, load_config
 
 TEMPLATE = """# arJev configuration — this file is the setup checklist: every slot below is a
 # decision you make, and each slot carries its one-line explanation. arJev ranks
@@ -77,12 +77,15 @@ def init_config(roots: str, config_path: Path | None = None, smoke: tuple[str, s
     edits survive re-runs; editing is by hand or the agent, never by init)."""
     path = config_path or default_config_path()
     if path.is_file():
-        raise FileExistsError(f"config already exists at {path} — init never rewrites an existing config; edit it by hand")
+        raise FileExistsError(
+            f"config already exists at {path} — init never rewrites an existing config; edit it by hand"
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(TEMPLATE.format(roots=roots))
     if smoke is not None:
         from .digest import run_digest
 
         feed_file, post = smoke
-        run_digest(Config(), feed_file=feed_file, post=post)
+        # the smoke proves the WRITTEN config is runnable — load it, don't replay defaults
+        run_digest(load_config(path), feed_file=feed_file, post=post)
     return path

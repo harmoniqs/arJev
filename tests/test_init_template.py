@@ -6,12 +6,13 @@ contract the runbook cites slot-by-slot)."""
 from __future__ import annotations
 
 import re
+import shutil
 import tomllib
 
 import pytest
 
 from arjev.init import init_config
-from conftest import RSS, VAULT
+from conftest import RSS, TODAY, VAULT, isolate_state
 
 # every decision slot the checklist-file must carry (the runbook cites these slot-by-slot)
 DECISION_SLOTS = [
@@ -21,7 +22,7 @@ DECISION_SLOTS = [
 ]
 
 
-def write_config(tmp_path) -> "object":
+def write_config(tmp_path) -> str:
     """Init on the fixture vault; return the written file's text."""
     path = init_config(str(VAULT), config_path=tmp_path / "arjev.toml")
     return path.read_text()
@@ -99,7 +100,40 @@ def test_three_field_remap_examples(tmp_path):
     lowered = content.lower()
     for marker in ("physics vault", "zotero-style vault", "econ vault"):
         assert marker in lowered, f"the template shows a {marker} remap example"
-    example_identity_lines = [l for l in content.splitlines() if re.fullmatch(r"#\s+identity = .*", l)]
+    example_identity_lines = [ln for ln in content.splitlines() if re.fullmatch(r"#\s+identity = .*", ln)]
     assert len(example_identity_lines) == 3, "each example carries its own identity remap"
-    remaps = {l.split("=", 1)[1].strip() for l in example_identity_lines}
+    remaps = {ln.split("=", 1)[1].strip() for ln in example_identity_lines}
     assert len(remaps) == 3, "the three examples map three different schemas"
+
+
+def test_smoke_runs_the_digest_through_the_written_config(tmp_path, monkeypatch):
+    """Bootstrap acceptance: the smoke must run through the WRITTEN config — the
+    written file is the thing that has to be runnable. Observable without mocks:
+    a vault-sink smoke writes the digest note under the vault init was given
+    (the written config's roots); the in-memory-defaults path has no roots and
+    cannot (it crashes at the vault sink instead)."""
+    isolate_state(monkeypatch, tmp_path)
+    vault = tmp_path / "vault"
+    shutil.copytree(VAULT, vault)
+    path = init_config(str(vault), config_path=tmp_path / "arjev.toml", smoke=(str(RSS), "vault"))
+    assert path.is_file()
+    assert list((vault / "digests").glob("*.md")), \
+        "the smoke digested through the written config into the configured vault"
+
+
+def test_written_config_is_runnable_or_plainly_blocking(tmp_path, monkeypatch):
+    """The checklist-file's two legal states: with a feed the written config runs
+    a full digest; with no feeds and no feed file it exits naming the missing
+    slot — never a silent default-category digest."""
+    isolate_state(monkeypatch, tmp_path)
+    from arjev.config import load_config
+    from arjev.digest import run_digest
+
+    path = init_config(str(VAULT), config_path=tmp_path / "arjev.toml")
+    cfg = load_config(path)
+    assert cfg.feeds == []
+    assert (cfg.top, cfg.screen, cfg.probe_k, cfg.half_life_days) == (5, 40, 20, 180.0)
+    result = run_digest(cfg, feed_file=str(RSS), today=TODAY, post="stdout")
+    assert result.picks, "the written config runs a full digest through the fixture"
+    with pytest.raises(SystemExit, match="feeds"):
+        run_digest(cfg, today=TODAY)
