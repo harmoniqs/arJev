@@ -40,8 +40,12 @@ probe_k = 20
 
 
 def init_config(roots: str, config_path: Path | None = None, smoke: tuple[str, str] | None = None) -> Path:
-    """Write the config; smoke = (feed_file, post) runs a digest through it."""
+    """Write the config; smoke = (feed_file, post) runs a digest through it.
+    Init never rewrites: an existing config raises FileExistsError (a user's hand
+    edits survive re-runs; editing is by hand or the agent, never by init)."""
     path = config_path or default_config_path()
+    if path.is_file():
+        raise FileExistsError(f"config already exists at {path} — init never rewrites an existing config; edit it by hand")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(TEMPLATE.format(roots=roots))
     if smoke is not None:

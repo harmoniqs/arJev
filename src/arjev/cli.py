@@ -82,7 +82,11 @@ def main(argv: list[str] | None = None) -> int:
         from .init import init_config
 
         smoke = (args.smoke_feed_file, args.smoke_post) if args.smoke_feed_file else None
-        path = init_config(args.vault, Path(args.config).expanduser() if args.config else None, smoke)
+        try:
+            path = init_config(args.vault, Path(args.config).expanduser() if args.config else None, smoke)
+        except FileExistsError as exc:
+            print(f"{exc}", file=sys.stderr)
+            return 1
         print(f"config written: {path}")
         return 0
     if args.cmd == "digest":
