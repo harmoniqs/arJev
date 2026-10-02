@@ -144,6 +144,13 @@ def run_digest(
 
         sc = slack_client or SlackClient(token=slack_token())
         record.slack_channel = cfg.slack_channel
+        # the digest header: one message that reads AS the digest (the channel
+        # showed five bare picks could be mistaken for bot noise)
+        sc.post_message(
+            cfg.slack_channel,
+            f"*arJev daily digest — {today.isoformat()}* — {len(picks)} picks · {mode} · "
+            f"{len(items)} new items ranked against the lab vault",
+        )
         for i, p in enumerate(picks):
             msg = render_pick_message(p, i + 1, len(picks), today, feed_name, mode, cfg.why_style)
             ts = sc.post_message(cfg.slack_channel, msg.text)
