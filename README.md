@@ -8,8 +8,8 @@ Your vault is the source of truth: the taste profile is folded from your paper n
 
 Keyword-based paper alerts miss everything that isn't spelled the same way ("jitter robustness" never matches "amplitude noise"), never learn from what you actually read, and can't be installed by anyone outside the lab that built them. arJev fixes all three:
 
-- **A deterministic lexical front-line** ranks the day's arXiv feed against your taste profile. Free, instant, auditable — every pick says why it matched.
-- **[Jev](https://typesafe.ai) — a cheap, calibrated decision model — re-scores the full feed.** Every item is screened, so a paper with zero keyword overlap still surfaces if it's relevant. Every call is a logged receipt; every seam fails open to the lexical ranking. **No key required** — without one, arJev runs lexical-only and says so.
+- **A decision model at the front line.** With a [Jev](https://typesafe.ai) key (the default), a cheap, calibrated model screens the **full feed** — every item, every day — so papers with zero keyword overlap still surface when they're relevant. Every call is a logged receipt.
+- **The vault still explains every pick.** Your taste profile supplies the matched terms on each why-line and the tiebreak — and it carries the whole digest without a key: no Jev, no outage, no problem; the ranking falls back to the deterministic lexical order and the `mode:` line says exactly which engine ran.
 - **A learning loop.** A paper you keep (Slack reaction, `arjev keep`, or a checkbox) is scaffolded into your vault as a staged note; a paper that lands there feeds taste back; `arjev calibrate` replays past digests against your labels and reports Brier scores, reliability, precision@5 — with honest n, never fake confidence.
 
 ## Install
@@ -17,7 +17,7 @@ Keyword-based paper alerts miss everything that isn't spelled the same way ("jit
 Python 3.11+:
 
 ```bash
-uv tool install git+https://github.com/harmoniqs/arJev@v0.1.9
+uv tool install git+https://github.com/harmoniqs/arJev@v0.2.4
 arjev init --vault /path/to/your/vault    # scaffolds the config, runs a smoke digest
 arjev digest --feed quant-ph              # today's picks, explainable, to stdout
 ```

@@ -27,7 +27,7 @@ lexical-only without them and says so). **Invariants you must respect:**
 ## 1. Install
 
 ```bash
-uv tool install git+https://github.com/harmoniqs/arJev@v0.1.9
+uv tool install git+https://github.com/harmoniqs/arJev@v0.2.4
 ```
 
 (`pipx install` works too. Python 3.11+ required.)
