@@ -78,10 +78,14 @@ def fetch_feed(url: str, timeout: float = 30.0) -> str:
 
 
 def load_feed(feed: str | None = None, feed_file: str | None = None) -> list[FeedItem]:
-    """From a recorded fixture file (deterministic, CI) or the live RSS (deployment)."""
+    """From a recorded fixture file (deterministic, CI) or the live RSS (deployment).
+    No default category — a caller that passes neither a feed nor a file is an error,
+    not a silent fetch of someone else's field (issue #53)."""
     if feed_file:
         return parse_arxiv_rss(Path(feed_file).read_text())
-    return parse_arxiv_rss(fetch_feed(feed_url(feed or "quant-ph")))
+    if feed is None:
+        raise ValueError("load_feed needs an arXiv feed name or a feed_file — no category is ever defaulted")
+    return parse_arxiv_rss(fetch_feed(feed_url(feed)))
 
 
 def load_feeds(feeds: list[str], feed_files: list[str] | None = None) -> list[FeedItem]:

@@ -216,6 +216,20 @@ def test_unrelated_note_at_the_path_is_ignored():
     assert not typed.present
 
 
+def test_default_feeds_empty_field_neutral(tmp_path):
+    """Field-neutral defaults: the config never substitutes an arXiv category —
+    a fresh install loads feeds == [] (the grep-equivalent criterion, as a load)."""
+    from arjev.config import Config, load_config
+
+    assert Config().feeds == []
+    # no config file at all → the built-in default
+    assert load_config(tmp_path / "missing.arjev.toml").feeds == []
+    # a config file without a feeds key → still empty, never a category
+    cfgfile = tmp_path / "arjev.toml"
+    cfgfile.write_text('[vault]\nroots = ["/x"]\n')
+    assert load_config(cfgfile).feeds == []
+
+
 def test_config_reads_digest_keys_from_both_placements(tmp_path):
     """The TOML table trap, generalized: keys after [vault] belong to that table —
     the config accepts digest-level keys from both top level and inside [vault]."""
