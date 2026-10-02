@@ -50,8 +50,10 @@ arjev slack sync                             # after: harvest reactions → labe
 `slack sync` reads the digest journal for posted messages, harvests reactions
 (keepers-gated) and thread replies, writes label rows, and **auto-scaffolds a staged
 vault stub** for every new keep — decision in Slack, record in Obsidian, zero steps
-between. Re-run it as often as you like; it's idempotent. Rate discipline is built in
-(≤ 1 request/s, 429 backoff).
+between. Each stub lands with `status: staged`, awaiting prose (the write seam —
+your agent or your hand writes the body and flips it to `written`; see
+[agent-setup.md](agent-setup.md)). Re-run `arjev slack sync` as often as you like;
+it's idempotent. Rate discipline is built in (≤ 1 request/s, 429 backoff).
 
 ## Security notes
 
