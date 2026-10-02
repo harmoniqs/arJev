@@ -46,6 +46,24 @@ tags = "tags"
 # status — frontmatter field for staged vs written; a written note's body feeds taste.
 status = "status"
 
+# [vault.fields] remaps to any note schema — three fields, three examples
+# (type is the [vault] discriminator, shown here with each mapping):
+# a physics vault — [vault] type = "paper"; its [vault.fields]:
+#   identity = ["arxiv", "doi"]
+#   read_date = "date_read"
+#   rating = "rating"
+#   why = "why"
+#   tags = "tags"
+#   status = "status"
+# a Zotero-style vault — [vault] type = "journalArticle"; its [vault.fields]:
+#   identity = ["doi", "arxiv"]
+#   read_date = "dateAdded"
+#   tags = "keywords"
+# an econ vault — [vault] type = "note"; its [vault.fields]:
+#   identity = ["arxiv"]
+#   why = "takeaway"
+#   tags = "topics"
+
 # digest_dir — where digest notes land; default: digests under the first root.
 # digest_dir = "/path/to/vault/digests"
 # library_dir — where `arjev fetch` saves PDFs.

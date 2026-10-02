@@ -89,3 +89,17 @@ def test_every_slot_carries_a_one_line_comment_naming_it_exactly(tmp_path):
         assert lines[i - 1].startswith(f"# {key} "), (
             f"slot {key} must be preceded by a one-line comment naming it exactly (line {i + 1})"
         )
+
+
+def test_three_field_remap_examples(tmp_path):
+    """Three different fields — a physics vault, a Zotero-style vault, an econ
+    vault — each shows how its [vault.fields] identity/type remapping would look,
+    so a fresh user can see the schema is theirs to map, not a given."""
+    content = write_config(tmp_path)
+    lowered = content.lower()
+    for marker in ("physics vault", "zotero-style vault", "econ vault"):
+        assert marker in lowered, f"the template shows a {marker} remap example"
+    example_identity_lines = [l for l in content.splitlines() if re.fullmatch(r"#\s+identity = .*", l)]
+    assert len(example_identity_lines) == 3, "each example carries its own identity remap"
+    remaps = {l.split("=", 1)[1].strip() for l in example_identity_lines}
+    assert len(remaps) == 3, "the three examples map three different schemas"
