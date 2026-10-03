@@ -244,6 +244,7 @@ def assemble_state(profile: Profile, candidate, now=None) -> StateAssembly:
             },
             "candidate": {
                 "title": candidate.item.title,
+                "authors": candidate.item.authors,  # authorship rides the state (issue #66)
                 "abstract": candidate.item.abstract[:ABSTRACT_BUDGET],
                 "arxiv": candidate.item.arxiv,
             },

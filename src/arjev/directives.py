@@ -19,10 +19,11 @@ class Directives:
     labs: list[str] = field(default_factory=list)
     companies: list[str] = field(default_factory=list)
     topics: list[str] = field(default_factory=list)
+    authors: list[str] = field(default_factory=list)  # tracked people — issue #66
 
     @property
     def present(self) -> bool:
-        return bool(self.body or self.labs or self.companies or self.topics)
+        return bool(self.body or self.labs or self.companies or self.topics or self.authors)
 
     def all_terms(self) -> list[str]:
         return self.labs + self.companies + self.topics
@@ -58,6 +59,7 @@ def parse_directives(text: str) -> Directives:
     directives = Directives(
         body=body.strip(),
         labs=[str(x) for x in (fm.get("labs") or [])],
+        authors=[str(x) for x in (fm.get("authors") or [])],
         companies=[str(x) for x in (fm.get("companies") or [])],
         topics=[str(x) for x in (fm.get("topics") or [])],
     )

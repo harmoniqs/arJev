@@ -76,6 +76,7 @@ def _tokens(text: str) -> list[str]:
 @dataclass
 class Profile:
     terms: dict[str, float] = field(default_factory=dict)
+    author_terms: dict[str, float] = field(default_factory=dict)  # tracked people (issue #66)
     why_lines: list[tuple[date | None, str]] = field(default_factory=list)
     recent_titles: list[str] = field(default_factory=list)
     note_count: int = 0
@@ -106,6 +107,12 @@ def build_profile(fold: FoldResult, cfg, now: date, directives=None) -> Profile:
             t = term.lower().strip()
             if t:
                 profile.terms[t] = profile.terms.get(t, 0.0) + DIRECTIVE_WEIGHT
+        # tracked people: a SEPARATE namespace — "Schuster" must never fire on an
+        # abstract that merely mentions a Schuster; these match only the authors field
+        for term in directives.authors:
+            t = term.lower().strip()
+            if t:
+                profile.author_terms[t] = profile.author_terms.get(t, 0.0) + DIRECTIVE_WEIGHT
     contributing = [p for p in fold.papers if p.contributes_taste]
     profile.note_count = len(fold.papers)
     profile.degraded = len(fold.papers) < DEGRADED_MIN_NOTES or not any(p.why for p in contributing)
