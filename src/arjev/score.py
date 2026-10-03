@@ -27,17 +27,25 @@ def _count_matches(text_lower: str, term: str) -> int:
     return len(matches)
 
 
+def _fold_name(text: str) -> str:
+    """NFKD-fold: accents must not break name matching — the roster carries
+    'Cuenca-Gómez' while feeds print 'Cuenca-Gomez' (issue #66 hardening)."""
+    import unicodedata
+
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+
+
 def _name_match(roster_entry: str, authors: list[str]) -> bool:
     """Surname token + first-initial agreement. A surname-only roster entry
     matches any first name (a deliberate whole-family follow); a mismatched
-    initial never matches. Case-insensitive throughout (issue #66)."""
-    entry = roster_entry.lower().replace(".", " ").split()
+    initial never matches. Case-insensitive + accent-folded throughout (issue #66)."""
+    entry = _fold_name(roster_entry.lower()).replace(".", " ").split()
     surname = entry[-1] if entry else ""
     if not surname:
         return False
     initial = entry[0][0] if len(entry) > 1 else ""
     for author in authors:
-        parts = author.lower().replace(".", " ").split()
+        parts = _fold_name(author.lower()).replace(".", " ").split()
         if not parts or parts[-1] != surname:
             continue
         if initial and len(parts[0]) >= 1 and parts[0][0] != initial:
