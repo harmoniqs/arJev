@@ -13,6 +13,7 @@ Signals per contributing note (spec: tags · why-lines · body terms · wikilink
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -40,6 +41,10 @@ STOPWORDS = {
     "present", "turn", "run", "against", "across", "during", "longer", "family", "sets",
     "ability", "side", "probability", "scheme", "manner", "after", "version", "measured",
     "matching", "property", "properties", "analogue",
+    # function words observed riding live why-lines after the write-the-vault batch
+    "until", "since", "because", "without", "instead", "toward", "towards", "well",
+    "once", "whether", "where", "would", "could", "should", "does", "did", "done",
+    "being", "been", "very", "same", "later", "back", "own", "part", "parts",
 }
 DEGRADED_MIN_NOTES = 5
 
@@ -105,6 +110,13 @@ def build_profile(fold: FoldResult, cfg, now: date, directives=None) -> Profile:
     profile.note_count = len(fold.papers)
     profile.degraded = len(fold.papers) < DEGRADED_MIN_NOTES or not any(p.why for p in contributing)
     body_sourced: dict[str, float] = {}
+    # pass 1: document frequency — how many contributing notes use each token.
+    # selectivity is computed before weighting so a rare word can outrank
+    # a frequent one (issue #61: discrimination beats raw frequency)
+    doc_freq: dict[str, int] = {}
+    for note in contributing:
+        for tok in set(_tokens(note.title)) | set(_tokens(_clean_body(note.body))):
+            doc_freq[tok] = doc_freq.get(tok, 0) + 1
     from .rate import RATING_WEIGHT
 
     for note in contributing:
@@ -114,8 +126,9 @@ def build_profile(fold: FoldResult, cfg, now: date, directives=None) -> Profile:
         for tag in note.tags:
             _bump(profile, tag, TAG_WEIGHT, mult, cfg)
         for tok in _tokens(note.title) + _tokens(_clean_body(note.body)):
-            _bump(profile, tok, BODY_WEIGHT, mult, cfg)
-            body_sourced[tok] = body_sourced.get(tok, 0.0) + BODY_WEIGHT * mult
+            idf = _idf_factor(doc_freq, tok, len(contributing))
+            _bump(profile, tok, BODY_WEIGHT * idf, mult, cfg)
+            body_sourced[tok] = body_sourced.get(tok, 0.0) + BODY_WEIGHT * idf * mult
         if note.why:
             profile.why_lines.append((note.read_date, note.why))
     profile.why_lines.sort(key=lambda pair: pair[0] or date.min, reverse=True)
@@ -127,6 +140,16 @@ def build_profile(fold: FoldResult, cfg, now: date, directives=None) -> Profile:
 
 CORPUS_GENERIC_FRACTION = 0.8
 CORPUS_GENERIC_MIN_NOTES = 3
+
+IDF_FLOOR = 1.0  # a df=1 term in a small vault must not explode the weight
+
+
+def _idf_factor(doc_freq: dict[str, int], token: str, n_notes: int) -> float:
+    """How selectively the vault uses this word. A term present in half the notes
+    carries strictly less taste than a rare one with the same raw count —
+    discrimination, not frequency, is the signal (issue #61)."""
+    df = doc_freq.get(token, 1)
+    return max(IDF_FLOOR, math.log(n_notes / max(1, df)) + 1.0)
 
 
 def _cap_corpus_generic_terms(profile: Profile, body_sourced: dict[str, float], contributing: list[PaperNote]) -> None:
