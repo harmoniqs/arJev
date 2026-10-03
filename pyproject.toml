@@ -1,6 +1,6 @@
 [project]
 name = "arjev"
-version = "0.3.0"
+version = "0.3.1"
 description = "A daily arXiv digest engine that ranks against your living Obsidian vault."
 readme = "README.md"
 license = { file = "LICENSE" }
