@@ -35,8 +35,8 @@ def score_item(item: FeedItem, profile: Profile) -> ScoredItem:
     for term, weight in sorted(profile.terms.items(), key=lambda kv: -kv[1]):
         in_title = _count_matches(title, term)
         in_abstract = _count_matches(abstract, term)
-        if in_title + in_abstract == 0:
-            continue
+        if in_title + in_abstract == 0 or weight <= 0:
+            continue  # a capped-to-zero term matches nothing and explains nothing
         specificity = 1 + min(1, len(term) / 16)
         score += weight * specificity * (in_title * 3 + in_abstract)
         terms.append(term)
