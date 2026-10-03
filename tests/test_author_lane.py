@@ -85,6 +85,13 @@ body
     assert assembly.state["candidate"]["authors"] == ["D. I. Schuster"]
 
 
+def test_accents_never_break_matching():
+    # the registry carries accented names; feeds print folded forms — and vice versa
+    assert _name_match("Esperanza Cuenca-Gómez", ["E. Cuenca-Gomez"])
+    assert _name_match("R. Lescanne", ["Raphaël Lescanne"])
+    assert _name_match("Loïc Henriet", ["L. Henriet"])
+
+
 def test_zero_roster_is_inert():
     assert parse_directives("---\ntype: directives\n---\nbody").authors == []
     assert parse_directives("no frontmatter at all").authors == []
