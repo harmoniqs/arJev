@@ -29,9 +29,13 @@ def isolate_state(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def _no_live_credentials(monkeypatch):
-    """A test suite must never inherit the operator's real keys — without this,
-    the machine's ARJEV_JEV_KEY leaked into 'no key' tests and fired real calls."""
+def _no_live_state_or_credentials(monkeypatch, tmp_path):
+    """A test suite must never touch the operator's real keys OR her real state
+    dir. Credential clearing was autouse already; state isolation (XDG_STATE_HOME
+    -> tmp) was per-fixture only, and a bare run_digest test wrote a fixture run
+    into the LIVE journal (found 2026-10-02: run 20261002T160824Z). Both are
+    autouse now — no test can inherit the machine, period."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     for var in ("ARJEV_JEV_KEY", "ARJEV_JEV_KEY_FILE", "ARJEV_JEV_DISABLED", "ARJEV_SLACK_TOKEN"):
         monkeypatch.delenv(var, raising=False)
 
