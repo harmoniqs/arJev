@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from .config import Config
-from .feed import arxiv_namespace, load_feed, load_feeds
+from .feed import arxiv_namespace, load_feed
 from .fold import fold_roots
 from .jev import JevClient, JevReceipt
 from .profile import build_profile, profile_flag
@@ -100,7 +100,22 @@ def run_digest(
     seed = seed or f"{feed or feed_file or 'feeds'}:{today.isoformat()}"
     fold = fold_roots(cfg.expanded_roots, cfg)
     profile = build_profile(fold, cfg, today)
-    items = load_feed(feed, feed_file) if (feed or feed_file) else load_feeds(cfg.feeds)
+    if feed or feed_file:
+        items = load_feed(feed, feed_file)
+        run_warnings = []
+    else:
+        from .feed import load_feeds_with_health
+
+        items, dead_feeds = load_feeds_with_health(cfg.feeds)
+        if dead_feeds and items:
+            run_warnings = [f"feed returned 0 items (possible outage): {', '.join(dead_feeds)}"]
+        elif dead_feeds:
+            raise SystemExit(
+                "feed failure — every configured feed returned 0 items; this is an outage "
+                "or an endpoint change, NOT a quiet day. Check the arXiv RSS status; no digest."
+            )
+        else:
+            run_warnings = []
     ranked = rank(
         items,
         profile,
@@ -137,6 +152,8 @@ def run_digest(
     if receipts:
         write_run_receipts(receipts)
     mode = mode_line(mode_primary, profile_flag(profile))
+    if run_warnings:
+        mode = f"{mode} · fetch-warning: {'; '.join(run_warnings)}"
     feed_name = feed or (Path(feed_file).stem if feed_file else "+".join(cfg.feeds))
 
     record = RunRecord(

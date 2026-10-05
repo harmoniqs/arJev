@@ -128,18 +128,29 @@ def load_feeds(feeds: list[str], feed_files: list[str] | None = None) -> list[Fe
     """The multi-feed union: fetch every configured feed, union the items, dedupe by
     normalized identity pair (cross-listed papers appear in several category feeds —
     one candidate, scored once). Feed order preserved for the winner."""
+    return load_feeds_with_health(feeds, feed_files)[0]
+
+
+def load_feeds_with_health(
+    feeds: list[str], feed_files: list[str] | None = None
+) -> tuple[list[FeedItem], list[str]]:
+    """The union plus the health view: which configured feeds returned zero items
+    (issue #70 — an empty feed is an outage signal, not a quiet day). Fixture files
+    are never health-checked; they are deterministic by construction."""
     items: list[FeedItem] = []
+    dead: list[str] = []
     seen: set[Identity] = set()
     for path in feed_files or []:
         for item in parse_arxiv_rss(Path(path).read_text()):
             if item.identity not in seen:
                 seen.add(item.identity)
                 items.append(item)
-    if not feeds:
-        return items
     for name in feeds:
+        before = len(items)
         for item in parse_arxiv_rss(fetch_feed(feed_url(name))):
             if item.identity not in seen:
                 seen.add(item.identity)
                 items.append(item)
-    return items
+        if len(items) == before and not (feed_files or []):
+            dead.append(name)
+    return items, dead
