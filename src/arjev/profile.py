@@ -45,6 +45,9 @@ STOPWORDS = {
     "until", "since", "because", "without", "instead", "toward", "towards", "well",
     "once", "whether", "where", "would", "could", "should", "does", "did", "done",
     "being", "been", "very", "same", "later", "back", "own", "part", "parts",
+    # round two, observed on the 2026-10-05 production picks ("why" rode the notes'
+    # own "Why it matters here" headers; "what" rode ordinary prose)
+    "what", "why", "there", "thus", "hence", "however",
 }
 DEGRADED_MIN_NOTES = 5
 
