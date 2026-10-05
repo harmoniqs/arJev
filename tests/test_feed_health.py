@@ -8,7 +8,6 @@ import pytest
 
 from arjev.config import Config
 from arjev.digest import run_digest
-
 from conftest import FIXTURES
 
 RSS_OK = str(FIXTURES / "rss-quant-ph.xml")
