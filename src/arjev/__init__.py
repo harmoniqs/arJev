@@ -3,4 +3,4 @@
 The brand is arJev (capitalized J, mirroring arXiv); identifiers (package, CLI,
 config paths) are lowercase arjev — the same convention arXiv itself uses."""
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
