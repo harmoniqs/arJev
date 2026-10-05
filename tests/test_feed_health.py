@@ -9,7 +9,9 @@ import pytest
 from arjev.config import Config
 from arjev.digest import run_digest
 
-RSS_OK = "/home/aaron/armonia/repos/arjev/tests/fixtures/rss-quant-ph.xml"
+from conftest import FIXTURES
+
+RSS_OK = str(FIXTURES / "rss-quant-ph.xml")
 
 
 def test_all_feeds_dead_is_a_loud_failure(monkeypatch, state_sandbox, tmp_path):
@@ -26,7 +28,7 @@ def test_all_feeds_dead_is_a_loud_failure(monkeypatch, state_sandbox, tmp_path):
 def test_partial_dead_warns_in_the_digest(monkeypatch, state_sandbox, tmp_path):
     from arjev import feed as feed_mod
 
-    fixture_text = Path("/home/aaron/armonia/repos/arjev/tests/fixtures/rss-cond-mat.xml").read_text()
+    fixture_text = Path(str(FIXTURES / "rss-cond-mat.xml")).read_text()
     def fake(url):
         # cond-mat lives, quant-ph is dead
         if "quant-ph" in url:
