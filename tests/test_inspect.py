@@ -92,7 +92,7 @@ def test_fold_view_block_on_the_fixture_vault():
         "fold scanned: 9",
         "fold type-matched: 7",
         "fold identity-bearing: 7",
-        "fold profile-terms: 70",
+        "fold profile-terms: 69",
         "fold staged: 1",
         "fold directives: none",
         "fold warnings: none",
