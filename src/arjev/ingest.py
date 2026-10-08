@@ -26,15 +26,15 @@ _API_URL = "https://export.arxiv.org/api/query?id_list={ids}&max_results=100"
 _PLACEHOLDER_TITLE = "arXiv:{arxiv}"
 
 
-def fetch_titles(arxiv_ids: list[str]) -> dict[str, str]:
-    """Resolve real titles from the arXiv API (batch id_list query — one call for
-    the whole seed). Fail-open: unresolved ids map to nothing, the placeholder
-    stands, and the backfill command can retry later."""
+def fetch_metadata(arxiv_ids: list[str]) -> dict[str, dict]:
+    """{id: {"title", "abstract"}} from the arXiv API (batch id_list query — one
+    call for the whole seed; the Atom entries carry the abstract, so capturing it
+    costs nothing extra). Fail-open: unresolved ids map to nothing."""
     import xml.etree.ElementTree as ET
 
     import httpx
 
-    titles: dict[str, str] = {}
+    meta: dict[str, dict] = {}
     for chunk in [arxiv_ids[i : i + 50] for i in range(0, len(arxiv_ids), 50)]:
         try:
             with httpx.Client(timeout=30, headers={"user-agent": "arjev/0.2 (harmoniqs/arJev)"}) as client:
@@ -44,11 +44,17 @@ def fetch_titles(arxiv_ids: list[str]) -> dict[str, str]:
             for entry in root.findall(f"{ns}entry"):
                 arxiv = (entry.findtext(f"{ns}id") or "").rsplit("abs/", 1)[-1].split("v")[0]
                 title = " ".join((entry.findtext(f"{ns}title") or "").split())
+                abstract = " ".join((entry.findtext(f"{ns}summary") or "").split())
                 if arxiv and title:
-                    titles[arxiv] = title
+                    meta[arxiv] = {"title": title, "abstract": abstract or None}
         except (httpx.HTTPError, ET.ParseError):
             continue
-    return titles
+    return meta
+
+
+def fetch_titles(arxiv_ids: list[str]) -> dict[str, str]:
+    """The title-only projection of fetch_metadata (the incumbent callers' contract)."""
+    return {arxiv: m["title"] for arxiv, m in fetch_metadata(arxiv_ids).items()}
 
 
 _PLACEHOLDER_LINE = re.compile(r'^title: "arXiv:([0-9]{4}\.[0-9]{4,5})"$', re.MULTILINE)

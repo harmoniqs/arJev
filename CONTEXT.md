@@ -21,3 +21,15 @@ before. No implementation detail lives here.
   writes its body; a written note's body feeds taste.
 - **inspect** — The read-only verification verb: it prints the checklist state
   and what the config actually sees, and exits nonzero when blocked.
+- **taste card** — One kept paper as the Jev state rides it under the
+  budget-greedy policy: the note's why plus the paper's own abstract and
+  conclusions excerpts, weighted by the note's decay and rating.
+- **budget-greedy** — The state-assembly policy where directives ride whole
+  and taste items fill the byte budget by recency-weighted priority; the
+  incumbent fixed-count policy is `fixed-15`.
+- **backfill** — The explicit, paced fetch of every corpus paper's PDF (plus
+  extracted text) into the library; the digest itself never fetches corpus
+  content, so the fold stays local and deterministic.
+- **finalist enrichment** — The candidate-half content arm: after the first
+  scoring pass, the top finalists are re-scored with their fetched
+  conclusions/outlook in the state; fail-open, cached, never in the library.

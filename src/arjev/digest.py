@@ -15,7 +15,8 @@ from pathlib import Path
 from .config import Config
 from .feed import arxiv_namespace, load_feed
 from .fold import fold_roots
-from .jev import JevClient, JevReceipt
+from .jev import JevClient, JevReceipt, policy_from_config
+from .paper_content import candidate_conclusions, corpus_content, read_sections_cache, sections_cache_dir
 from .profile import build_profile, profile_flag
 from .rank import rank
 from .render import canonical_picks, mode_line, render_mrkdwn, render_vault_note, write_vault_note
@@ -99,7 +100,11 @@ def run_digest(
     # feeds live in the journal's feed field, not in the seed (issue #53)
     seed = seed or f"{feed or feed_file or 'feeds'}:{today.isoformat()}"
     fold = fold_roots(cfg.expanded_roots, cfg)
-    profile = build_profile(fold, cfg, today)
+    policy = policy_from_config(cfg)
+    # the paper-content ladder resolves LOCAL sources only — the digest stays
+    # deterministic; cards ride without content when the library holds nothing
+    content = corpus_content(cfg) if policy.policy == "budget-greedy" else None
+    profile = build_profile(fold, cfg, today, content=content)
     if feed or feed_file:
         items = load_feed(feed, feed_file)
         run_warnings = []
@@ -129,6 +134,29 @@ def run_digest(
     client = jev_client or JevClient(key=None, min_confidence=cfg.jev_min_confidence)
     run_id = run_id_for(seed, today)
     receipts: list[JevReceipt] = []
+    # the content arm's enrich callable: cache-first, paced ONLY on real fetches
+    # (cache hits are free), fail-open per id. The library stays keep-only —
+    # candidate excerpts land in the state-dir sections cache.
+    content_enrich = None
+    if cfg.candidate_content:
+        cache_dir = sections_cache_dir()
+
+        def content_enrich(ids):
+            import time as _t
+
+            out = {}
+            for i, arxiv in enumerate(ids):
+                cached = read_sections_cache(arxiv, cache_dir).get("conclusions")
+                if cached is not None:
+                    out[arxiv] = cached  # a hit is free: no fetch, no sleep
+                    continue
+                conclusions = candidate_conclusions(arxiv, cache_dir)
+                if conclusions:
+                    out[arxiv] = conclusions
+                if i < len(ids) - 1:
+                    _t.sleep(cfg.candidate_pace_s)
+            return out
+
     # the ranking amendment: jev-first is the default when the layer can run at all
     # (no key → lexical-first automatically, the mode flag reports what ran)
     use_jev_first = cfg.ranking == "jev-first" and client.enabled
@@ -145,13 +173,16 @@ def run_digest(
                 scored_by_id[item.identity] = score_item(item, profile)
         picks, mode_primary, candidates = apply_jev_first(
             items, scored_by_id, skip, client, profile, run_id, receipts,
-            top=cfg.top, pace_s=cfg.jev_pace_s,
+            top=cfg.top, pace_s=cfg.jev_pace_s, policy=policy, enrich=content_enrich,
         )
     else:
-        picks, mode_primary, candidates = apply_jev(ranked, client, profile, run_id, receipts, top=cfg.top)
+        picks, mode_primary, candidates = apply_jev(ranked, client, profile, run_id, receipts,
+                                                    top=cfg.top, policy=policy, enrich=content_enrich)
     if receipts:
         write_run_receipts(receipts)
     mode = mode_line(mode_primary, profile_flag(profile))
+    if content_enrich is not None and mode_primary == "jev":
+        mode = f"{mode} · content: finalists"
     if run_warnings:
         mode = f"{mode} · fetch-warning: {'; '.join(run_warnings)}"
     feed_name = feed or (Path(feed_file).stem if feed_file else "+".join(cfg.feeds))

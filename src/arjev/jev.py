@@ -207,14 +207,49 @@ def _disabled() -> bool:
     return value not in ("", "0", "false", "no", "off")
 
 
-# ── state assembly (the 4096 budget; spec: Jev state assembly) ────────────────────
+# ── state assembly (budgeted, deterministic; spec: Jev state assembly) ────────────
 
+# the incumbent fixed-15 policy's canonical values (the spec's "4096 budget");
+# StatePolicy defaults reference them, so the knob surface and the spec stay in lockstep
 TASTE_BUDGET = 2500
 ABSTRACT_BUDGET = 750
 HARD_CAP = 4096
 WHY_CAP = 200
 TOP_TERMS = 15
 TOP_TITLES = 3
+DIRECTIVES_CAP = 800
+
+
+@dataclass
+class StatePolicy:
+    """The assembly knobs. The defaults ARE the incumbent fixed-15 policy —
+    budget-greedy and candidate conclusions are opt-in arms until calibrate replays
+    say otherwise (the vendor documents context rot: accuracy falls as irrelevant
+    state grows, so bigger states must measurably beat the incumbent, not ship)."""
+
+    policy: str = "fixed-15"  # "fixed-15" | "budget-greedy"
+    taste_budget: int = TASTE_BUDGET
+    abstract_budget: int = ABSTRACT_BUDGET
+    hard_cap: int = HARD_CAP
+    why_cap: int = WHY_CAP
+    top_terms: int = TOP_TERMS
+    top_titles: int = TOP_TITLES
+    directives_cap: int = DIRECTIVES_CAP  # fixed-15 truncation of authored taste (greedy: whole)
+    candidate_conclusions: bool = False
+    candidate_conclusions_chars: int = 600
+    enrich_k: int = 10  # finalists re-scored with candidate conclusions (jev-first)
+
+
+def policy_from_config(cfg) -> StatePolicy:
+    from .config import Config
+
+    if not isinstance(cfg, Config):
+        raise TypeError("policy_from_config takes a Config")
+    return StatePolicy(
+        policy=cfg.state_policy,
+        taste_budget=cfg.taste_budget_bytes,
+        candidate_conclusions=cfg.candidate_content,
+    )
 
 
 @dataclass
@@ -225,46 +260,120 @@ class StateAssembly:
     dropped_why: int = 0
 
 
-def assemble_state(profile: Profile, candidate, now=None) -> StateAssembly:
-    """Budgeted, deterministic: top ~15 weighted terms, then why-lines (recency-first,
-    capped 200 chars), then 3 recent titles, into a 2.5 KB soft budget; the candidate's
-    title + 0.75 KB abstract follow. Overflow: drop lowest-weight terms first, then
-    why-lines; still over 4096 → the item is skipped (fail-open, journaled)."""
-    terms = sorted(profile.terms.items(), key=lambda kv: (-kv[1], kv[0]))[:TOP_TERMS]
-    whys = [(d, w[:WHY_CAP]) for d, w in profile.why_lines]
-    titles = profile.recent_titles[:TOP_TITLES]
+def assemble_state(profile: Profile, candidate, policy: StatePolicy | None = None,
+                   conclusions: str | None = None) -> StateAssembly:
+    """Budgeted, deterministic. Fixed-15 (the incumbent): top ~15 weighted terms,
+    why-lines recency-first (capped), 3 recent titles, into the taste budget.
+    Budget-greedy (the context engine): directives whole, then terms and per-paper
+    taste cards compete on normalized priority (weight / category max — the decay
+    already rides the weights), filling the budget greedily; a small corpus fits
+    everything, a growing one gives recent work proportionally more of the window.
+    Candidate conclusions ride only when the arm is on. Overflow beyond the hard cap
+    still drops lowest-weight content first, then skips the item (fail-open,
+    journaled) — never silent truncation."""
+    policy = policy or StatePolicy()
+    candidate_block = {
+        "title": candidate.item.title,
+        "authors": candidate.item.authors,  # authorship rides the state (issue #66)
+        "abstract": candidate.item.abstract[: policy.abstract_budget],
+        "arxiv": candidate.item.arxiv,
+    }
+    if policy.candidate_conclusions and conclusions:
+        candidate_block["conclusions"] = conclusions[: policy.candidate_conclusions_chars]
+    if policy.policy == "budget-greedy":
+        return _assemble_greedy(profile, candidate_block, policy)
+    return _assemble_fixed(profile, candidate_block, policy)
 
-    def build(term_count: int, why_count: int, body_cap: int = 800) -> dict:
+
+def _assemble_fixed(profile: Profile, candidate_block: dict, policy: StatePolicy) -> StateAssembly:
+    terms = sorted(profile.terms.items(), key=lambda kv: (-kv[1], kv[0]))[: policy.top_terms]
+    whys = [(d, w[: policy.why_cap]) for d, w in profile.why_lines]
+
+    def build(term_count: int, why_count: int) -> dict:
         return {
             "researcher_taste": {
-                "directives": (profile.directives_body[:body_cap] if profile.directives_body else None),
+                "directives": (profile.directives_body[: policy.directives_cap]
+                               if profile.directives_body else None),
                 "terms": {t: round(w, 2) for t, w in terms[:term_count]},
                 "why_lines": [w for _, w in whys[:why_count]],
-                "recent_titles": titles,
+                "recent_titles": profile.recent_titles[: policy.top_titles],
             },
-            "candidate": {
-                "title": candidate.item.title,
-                "authors": candidate.item.authors,  # authorship rides the state (issue #66)
-                "abstract": candidate.item.abstract[:ABSTRACT_BUDGET],
-                "arxiv": candidate.item.arxiv,
-            },
+            "candidate": candidate_block,
         }
 
     state = build(len(terms), len(whys))
     size = _size(state)
     dropped_terms = 0
-    while size > TASTE_BUDGET + ABSTRACT_BUDGET + 128 and len(terms) - dropped_terms > 3:
+    while size > policy.taste_budget + policy.abstract_budget + 128 and len(terms) - dropped_terms > 3:
         dropped_terms += 5
         state = build(len(terms) - dropped_terms, len(whys))
         size = _size(state)
     dropped_why = 0
-    while size > HARD_CAP and len(whys) - dropped_why > 0:
+    while size > policy.hard_cap and len(whys) - dropped_why > 0:
         dropped_why += 1
         state = build(len(terms) - dropped_terms, len(whys) - dropped_why)
         size = _size(state)
-    if size > HARD_CAP:
+    if size > policy.hard_cap:
         return StateAssembly(None, size, dropped_terms, dropped_why)
     return StateAssembly(state, size, dropped_terms, dropped_why)
+
+
+def _assemble_greedy(profile: Profile, candidate_block: dict, policy: StatePolicy) -> StateAssembly:
+    # directives ride WHOLE (the authored taste outranks every derived signal, and
+    # the fixed-15 800-char truncation was throwing most of it away)
+    items: list[tuple[float, str, str, dict]] = []
+    max_term = max(profile.terms.values(), default=0.0) or 1.0
+    for term, weight in profile.terms.items():
+        items.append((weight / max_term, f"t:{term}", "term", {term: round(weight, 2)}))
+    max_card = max((card.weight for card in profile.cards), default=0.0) or 1.0
+    for card in profile.cards:
+        payload = {"title": card.title}
+        if card.read:
+            payload["read"] = card.read.isoformat()
+        if card.why:
+            payload["why"] = card.why[: policy.why_cap]
+        if card.abstract:
+            payload["abstract"] = card.abstract
+        if card.conclusions:
+            payload["conclusions"] = card.conclusions
+        items.append((card.weight / max_card, f"c:{card.title}", "card", payload))
+    # strict (priority, name) order — the fill is deterministic; a skipped big item
+    # never blocks a fitting smaller one (true greedy, not first-fit)
+    items.sort(key=lambda it: (-it[0], it[1]))
+    terms: dict[str, float] = {}
+    cards: list[dict] = []
+    used = 0
+    for _, _, kind, payload in items:
+        size = len(json.dumps(payload, sort_keys=True).encode())
+        if used + size > policy.taste_budget:
+            continue
+        used += size
+        if kind == "term":
+            terms.update(payload)
+        else:
+            cards.append(payload)
+    state = {
+        "researcher_taste": {
+            "directives": profile.directives_body or None,
+            "terms": terms or None,
+            "cards": cards or None,
+            "recent_titles": profile.recent_titles[: policy.top_titles],
+        },
+        "candidate": candidate_block,
+    }
+    size = _size(state)
+    # hard-cap backstop: drop lowest-priority content (last-in) until it fits
+    while size > policy.hard_cap and (cards or terms):
+        if cards:
+            cards.pop()
+        elif terms:
+            terms.popitem()
+        state["researcher_taste"]["cards"] = cards or None
+        state["researcher_taste"]["terms"] = terms or None
+        size = _size(state)
+    if size > policy.hard_cap:
+        return StateAssembly(None, size)
+    return StateAssembly(state, size)
 
 
 def _size(state: dict) -> int:

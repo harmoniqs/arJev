@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from .feed import Identity
-from .jev import JevClient, JevReceipt, assemble_state, write_receipts
+from .jev import JevClient, JevReceipt, StatePolicy, assemble_state, write_receipts
 from .rank import RankResult
 
 
@@ -98,16 +98,23 @@ def apply_jev_first(
     receipts: list[JevReceipt],
     top: int,
     pace_s: float = 0.05,
+    policy: StatePolicy | None = None,
+    enrich=None,
 ) -> tuple[list[Pick], str, list[CandidateJournal]]:
     """The ranking amendment: Jev at the front line. Every eligible item (not corpus,
     not posted) is Jev-scored; picks rank by top-two-level mass with lexical tiebreak.
     Per-item fail-open falls to the lexical order; the probe is moot (nothing
     unscreened). Pools stay in the journal as lexical classifications. The join
     inputs are identity-keyed: `skip` is the vault's arxiv namespace lifted into
-    pairs, `scored_by_id` maps identity pairs to scored items."""
+    pairs, `scored_by_id` maps identity pairs to scored items.
+    Candidate conclusions (the content arm): jev-first screens EVERYTHING, so the
+    enrichment rides the finalists only — after the first pass, the top enrich_k
+    are re-scored with their conclusions in the state (two-pass, bounded fetches;
+    the enriched call supersedes, and calibrate dedups on the last receipt)."""
     import time as _time
 
     mode_primary = "lexical-only"
+    policy = policy or StatePolicy()
     evaluated: list[Pick] = []
     fail_reasons: dict[Identity, str] = {}
     # receipt binding: the client appends at most one receipt per call — the pair
@@ -120,7 +127,7 @@ def apply_jev_first(
         s = scored_by_id.get(item.identity)
         if s is None:
             continue
-        assembly = assemble_state(profile, s)
+        assembly = assemble_state(profile, s, policy)
         if assembly.state is None:
             fail_reasons[item.identity] = "state-overflow"
             receipt_of[item.identity] = None
@@ -142,6 +149,10 @@ def apply_jev_first(
             evaluated.append(Pick(item.identity.id, item.title, s.score, s.terms, 0.0, None, answer.fail_reason,
                                   source=item.source))
     evaluated.sort(key=lambda p: (-p.jev_primary, -p.lexical_score, p.identity))
+    if policy.candidate_conclusions and enrich is not None and evaluated:
+        _rescore_finalists(evaluated, scored_by_id, client, profile, run_id, receipts, policy, enrich,
+                            receipt_of, fail_reasons)
+        evaluated.sort(key=lambda p: (-p.jev_primary, -p.lexical_score, p.identity))
     picks = evaluated[:top]
     picked = {p.identity for p in picks}
     # lexical pool labels stay in the journal as calibration denominators
@@ -157,6 +168,35 @@ def apply_jev_first(
     return picks, mode_primary, candidates
 
 
+def _rescore_finalists(evaluated, scored_by_id, client, profile, run_id, receipts, policy, enrich,
+                       receipt_of, fail_reasons) -> None:
+    """The two-pass enrichment: the top enrich_k finalists get their conclusions
+    fetched (bounded, cached, paced by the enrich callable) and ONE re-score with
+    the enriched state; the enriched mass supersedes, in place. Fail-open per
+    finalist: no conclusions or a failed re-score keeps the first-pass mass — the
+    enrichment can only refine, never break, the ranking."""
+    content = enrich([p.identity.id for p in evaluated[: policy.enrich_k]])
+    for p in evaluated[: policy.enrich_k]:
+        conclusions = content.get(p.identity.id)
+        if not conclusions:
+            continue
+        s = scored_by_id.get(p.identity)
+        if s is None:
+            continue
+        assembly = assemble_state(profile, s, policy, conclusions)
+        if assembly.state is None:
+            continue
+        before = len(receipts)
+        answer = client.score_relevance(assembly.state, p.identity.id, run_id, receipts)
+        if len(receipts) > before:
+            receipt_of[p.identity] = receipts[before]
+        if not answer.ok:
+            continue
+        mass = answer.distribution.get("must-read", 0.0) + answer.distribution.get("worth-reading", 0.0)
+        p.jev_primary = mass
+        fail_reasons.pop(p.identity, None)
+
+
 def _lexical_pool(identity: Identity, scored_by_id: dict) -> str:
     s = scored_by_id.get(identity)
     if s is None:
@@ -167,12 +207,21 @@ def _lexical_pool(identity: Identity, scored_by_id: dict) -> str:
 
 
 def apply_jev(rank: RankResult, client: JevClient, profile, run_id: str, receipts: list[JevReceipt],
-              top: int) -> tuple[list[Pick], str, list[CandidateJournal]]:
+              top: int, policy: StatePolicy | None = None, enrich=None) -> tuple[list[Pick], str,
+                                                                                list[CandidateJournal]]:
     """Rerank survivors (Score), rescue near-miss and probe items (Noul). Returns
     (picks, primary_mode, candidate journal rows). Fail-open per item, journaled.
     Every join — pool membership, posted flags, rescues, receipts — routes through
-    the identity pair; journal rows persist the pair's id half (frozen schema)."""
+    the identity pair; journal rows persist the pair's id half (frozen schema).
+    Candidate conclusions (the content arm): the pools are bounded here, so pool
+    members are enriched BEFORE their single call — no second pass needed."""
     mode_primary = "lexical-only"
+    policy = policy or StatePolicy()
+    content: dict[str, str] = {}
+    if policy.candidate_conclusions and enrich is not None:
+        pool_ids = [s.item.identity.id for pool in (rank.pools.survivors, rank.pools.near_miss, rank.pools.probe)
+                    for s in pool]
+        content = enrich(pool_ids)
     candidates: list[CandidateJournal] = []
     evaluated: list[Pick] = []
     # survivors stay pick candidates even on fail-open (the lexical ranking IS the
@@ -187,7 +236,7 @@ def apply_jev(rank: RankResult, client: JevClient, profile, run_id: str, receipt
 
     for s in rank.pools.survivors:
         before = len(receipts)
-        answer = _score_or_fail(client, profile, s, run_id, receipts)
+        answer = _score_or_fail(client, profile, s, run_id, receipts, policy, content.get(s.item.identity.id))
         receipt_of[s.item.identity] = receipts[before] if len(receipts) > before else None
         if answer is None:
             evaluated.append(Pick(s.item.identity.id, s.item.title, s.score, s.terms, 0.0, None,
@@ -207,7 +256,7 @@ def apply_jev(rank: RankResult, client: JevClient, profile, run_id: str, receipt
     for pool_name, source in (("near-miss", rank.pools.near_miss), ("probe", rank.pools.probe)):
         for s in source:
             before = len(receipts)
-            answer = _noul_or_fail(client, profile, s, run_id, receipts)
+            answer = _noul_or_fail(client, profile, s, run_id, receipts, policy, content.get(s.item.identity.id))
             receipt_of[s.item.identity] = receipts[before] if len(receipts) > before else None
             if answer is None:
                 fail_reasons[s.item.identity] = "state-overflow"
@@ -269,15 +318,15 @@ def _jev_row_from_receipt(receipt: JevReceipt | None, fail_reason: str | None) -
     return row
 
 
-def _score_or_fail(client, profile, s, run_id, receipts):
-    assembly = assemble_state(profile, s)
+def _score_or_fail(client, profile, s, run_id, receipts, policy=None, conclusions=None):
+    assembly = assemble_state(profile, s, policy, conclusions)
     if assembly.state is None:
         return None
     return client.score_relevance(assembly.state, s.item.identity.id, run_id, receipts)
 
 
-def _noul_or_fail(client, profile, s, run_id, receipts):
-    assembly = assemble_state(profile, s)
+def _noul_or_fail(client, profile, s, run_id, receipts, policy=None, conclusions=None):
+    assembly = assemble_state(profile, s, policy, conclusions)
     if assembly.state is None:
         return None
     return client.noul_relevant(assembly.state, s.item.identity.id, run_id, receipts)

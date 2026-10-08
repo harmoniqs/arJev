@@ -39,6 +39,13 @@ def main(argv: list[str] | None = None) -> int:
     p_fetch.add_argument("arxiv")
     p_fetch.add_argument("--config", default=None)
 
+    p_backfill = sub.add_parser(
+        "backfill",
+        help="fetch every corpus paper missing library text (PDF + extracted .txt; API abstract as floor)",
+    )
+    p_backfill.add_argument("--pace-s", type=float, default=3.0, help="politeness gap between arXiv fetches")
+    p_backfill.add_argument("--config", default=None)
+
     p_staged = sub.add_parser("staged", help="the prose worklist: kept notes awaiting a body (read-only)")
     p_staged.add_argument("--config", default=None)
 
@@ -80,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
     p_cal = sub.add_parser("calibrate", help="replay joins → Brier, reliability, precision@5, probe lift")
     p_cal.add_argument("--config", default=None)
     p_cal.add_argument("--runs", type=int, default=30, help="journal window (last N runs)")
+    p_cal.add_argument("--replay-arms", action="store_true",
+                       help="A/B the state arms live (Jev calls + candidate fetches; labeled candidates only)")
     p_cal.add_argument("--json", action="store_true", help="machine-readable report")
 
     args = parser.parse_args(argv)
@@ -133,6 +142,19 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         path = fetch_pdf(args.arxiv, Path(cfg.library_dir).expanduser())
         print(f"fetched: {path}")
+        return 0
+    if args.cmd == "backfill":
+        from arjev.config import load_config
+        from arjev.paper_content import backfill_corpus
+
+        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        result = backfill_corpus(cfg, pace_s=args.pace_s)
+        print(
+            f"corpus: {result['n_corpus']} notes · fetched {len(result['fetched'])} · "
+            f"api-abstract-only {len(result['api_only'])} · failed {len(result['failed'])}"
+        )
+        if result["failed"]:
+            print(f"failed: {', '.join(result['failed'][:10])}")
         return 0
     if args.cmd == "staged":
         from arjev.config import load_config
@@ -250,12 +272,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"rated {args.arxiv} as {args.rating} in {path.name}")
         return 0
     if args.cmd == "calibrate":
-        from arjev.calibrate import calibrate
+        from arjev.calibrate import calibrate, calibrate_arms
         from arjev.config import load_config
         from arjev.fold import fold_roots
 
         cfg = load_config(Path(args.config).expanduser() if args.config else None)
-        report = calibrate(cfg, fold_roots(cfg.expanded_roots, cfg), runs=args.runs)
+        fold = fold_roots(cfg.expanded_roots, cfg)
+        if args.replay_arms:
+            from arjev.ingest import fetch_metadata
+            from arjev.jev import JevClient
+
+            report = calibrate_arms(cfg, fold, JevClient(key=None), fetch_metadata, runs=args.runs)
+        else:
+            report = calibrate(cfg, fold, runs=args.runs)
         import dataclasses
 
         print(json.dumps(dataclasses.asdict(report), indent=2, sort_keys=True) if args.json else report.render())

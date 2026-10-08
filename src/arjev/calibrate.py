@@ -56,7 +56,7 @@ class Report:
 def calibrate(cfg: Config, fold: FoldResult, runs: int = 30) -> Report:
     report = Report()
     journal = _load_journal(runs)
-    receipts = _load_receipts()
+    receipts = _latest_receipts(_load_receipts())
     ledger = LabelLedger()
 
     labels_by_id: dict[str, list[Label]] = {}
@@ -199,6 +199,106 @@ def _probe_lift(journal: list[dict], labels_by_id: dict) -> dict:
         "survivor_n": survivor_n,
         "lexical_zero_baseline": "zero rescues by construction (the probe pool scores 0)",
     }
+
+
+# ── the arms instrument (issue #75: the A/B that gates every default flip) ───────
+
+
+def calibrate_arms(cfg: Config, fold: FoldResult, client, fetch_metadata, runs: int = 30) -> Report:
+    """Re-assemble and re-score journaled, LABELED candidates under each state arm —
+    the instrument that decides whether budget-greedy and candidate content earn a
+    default flip (context rot is real; evidence, not economics, decides). Honest n
+    is labeled candidates only; arm receipts land in a separate arms file, never
+    the production join. `fetch_metadata` and the client are injectable (CI offline)."""
+    from .jev import StatePolicy, assemble_state
+    from .paper_content import candidate_conclusions
+    from .profile import build_profile
+    from .rerank import state_dir
+
+    report = Report()
+    journal = _load_journal(runs)
+    ledger = LabelLedger()
+    labels_by_id: dict[str, list[Label]] = {}
+    for label in ledger.rows():
+        labels_by_id.setdefault(label.arxiv_id, []).append(label)
+    # journaled candidates that carry a gradeable label — the honest n
+    journal_titles = {c["arxiv"]: c.get("title", "")
+                      for line in journal for c in line.get("candidates", []) if c.get("title")}
+    labeled = {arxiv: outcome for arxiv in journal_titles
+               if (outcome := _positive(labels_by_id.get(arxiv, []))) is not None}
+    if not labeled:
+        report.notes.append(
+            "replay-arms: n = 0 — no journaled candidate carries a gradeable label yet; "
+            "the arms are unmeasured, not refuted (collect keeps/skips first)."
+        )
+        report.metrics["replay_arms"] = {"n": 0}
+        return report
+    meta = fetch_metadata(sorted(labeled))
+    profile = build_profile(fold, cfg, _today(), content=_corpus_content_or_none(cfg))
+    arms = [
+        ("fixed-15/4KB", StatePolicy()),
+        ("greedy/4KB", StatePolicy(policy="budget-greedy", taste_budget=2500)),
+        ("greedy/8KB", StatePolicy(policy="budget-greedy", taste_budget=8000)),
+        ("fixed-15/4KB+content", StatePolicy(candidate_conclusions=True)),
+        ("greedy/4KB+content", StatePolicy(policy="budget-greedy", taste_budget=2500, candidate_conclusions=True)),
+        ("greedy/8KB+content", StatePolicy(policy="budget-greedy", taste_budget=8000, candidate_conclusions=True)),
+    ]
+    arm_receipts: list = []
+    run_id = f"arms-{_today().isoformat()}"
+    for name, policy in arms:
+        pairs: list[tuple[float, int]] = []
+        for arxiv, outcome in labeled.items():
+            m = meta.get(arxiv) or {}
+            item = _JournalCandidate(title=journal_titles.get(arxiv) or m.get("title") or "",
+                                     authors=[], abstract=m.get("abstract") or "", arxiv=arxiv)
+            conclusions = (candidate_conclusions(arxiv) if policy.candidate_conclusions else None)
+            assembly = assemble_state(profile, item, policy, conclusions)
+            if assembly.state is None:
+                continue
+            answer = client.score_relevance(assembly.state, arxiv, run_id, arm_receipts)
+            if not answer.ok:
+                continue
+            pairs.append((_p_positive({"primitive": "score", "distribution": answer.distribution}), outcome))
+        report.metrics[f"arm_{name}"] = {
+            "brier": round(sum((p - o) ** 2 for p, o in pairs) / len(pairs), 4) if pairs else None,
+            "n": len(pairs),
+        }
+    from .jev import write_receipts
+
+    if arm_receipts:
+        write_receipts(state_dir() / "arms", arm_receipts)
+    report.notes.append(
+        f"replay-arms: {len(labeled)} labeled candidate(s) re-scored per arm from the CURRENT "
+        "fold (state assembly is the live corpus, not the historical one — a first "
+        "reading, not a verdict); arm receipts: arms/ under the state dir."
+    )
+    report.notes.append("defaults flip on a measured win here; the tool never edits config.")
+    return report
+
+
+class _JournalCandidate:
+    """assemble_state's candidate seam: it reads .item.{title, authors, abstract, arxiv}."""
+
+    def __init__(self, title: str, authors: list[str], abstract: str, arxiv: str):
+        from types import SimpleNamespace
+
+        self.item = SimpleNamespace(title=title, authors=authors, abstract=abstract, arxiv=arxiv)
+
+
+def _corpus_content_or_none(cfg: Config) -> dict[str, dict] | None:
+    from .paper_content import corpus_content
+
+    return corpus_content(cfg)
+
+
+def _latest_receipts(receipts: list[dict]) -> list[dict]:
+    """The two-pass finalist enrichment appends a second score receipt for re-scored
+    candidates — the enriched call supersedes (it is the judgment the digest acted
+    on), so the calibration join keeps the LAST receipt per (run_id, candidate)."""
+    latest: dict[tuple[str, str], dict] = {}
+    for r in receipts:
+        latest[(r.get("run_id", ""), r["candidate_arxiv"])] = r
+    return list(latest.values())
 
 
 # ── loaders ─────────────────────────────────────────────────────────────────────

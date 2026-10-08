@@ -4,13 +4,49 @@ A daily arXiv digest engine that ranks against your **living Obsidian vault** �
 
 arJev serves **any field that posts to arXiv** — condensed matter, economics, quantitative biology, mathematics, any discipline with an arXiv category — and it sources nothing beyond arXiv: no PubMed, no RePEc, no journal feeds. If your field doesn't post to arXiv, arJev is not for you yet, and it will never silently rank a category you didn't choose.
 
+## The context engine: how your corpus becomes the ranking
+
+The design invariant: **your corpus can grow without bound; the model's window never does — and that's the mechanism, not a limitation.**
+
+Every digest runs the same fold:
+
+1. **Fold** — every note under your roots is scanned once; the papers you've kept become first-class records (title, your `why` line, your rating, tags, the vault's wikilink graph).
+2. **Taste cards** — each kept paper becomes a card: your why, the paper's own abstract, and its conclusions/outlook section (extracted from your local PDF library; your directives ride whole and first). Every card carries a 180-day half-life decay and your own rating verdict.
+3. **The budgeted window** — every candidate is judged against a fixed, byte-budgeted context assembled fresh for it: your directives, then cards, terms, and why-lines filled greedily by recency-weighted priority.
+
+Two phases fall out of that one mechanism:
+
+- **Small corpus → maximal fill.** When you've kept a handful of papers, everything you've ever kept rides the window — the early picks are judged against all of it.
+- **Growing corpus → recency-proportional width.** As the corpus grows past the window, the decay ranking gives recent work proportionally more of it. A paper read 300 days ago holds a quarter the width of one read 90 days ago. No reconfiguration — the window tracks your drift.
+
+The corpus never rides into the model wholesale: the fold is a local, linear scan, and the model's context is a fixed-budget summary regardless of vault size. A 10,000-note vault costs the same per digest as a 10-note one.
+
+### The numbers
+
+What the window holds, per budget (generic):
+
+| Budget | What rides |
+|---|---|
+| 2.5 KB (default) | full directives + ~15 weighted terms + recent why-lines |
+| 8 KB | full directives + ~4–6 recent taste cards (abstract + conclusions + why) + terms |
+| 12 KB | full directives + ~8–10 cards + terms — still under 5% of the model's context window |
+
+What it costs (measured in daily use at [Harmoniqs](https://harmoniqs.ai), three feeds):
+
+- **~650–980 papers screened per day** — every item in the multi-feed union is scored; the full feed is never truncated.
+- **~470 model calls per digest** (every eligible item is screened by [Jev](https://typesafe.ai), the calibrated ranking model), **median 171 ms** per call, p90 212 ms.
+- **~$0.02/day** at the default budget; the largest tested arm (~12 KB states) is still ~$0.06/day. The model's own window is 32k tokens — the largest arm uses single-digit percent of it.
+- **105 paper notes, a 64-PDF library**, and a median digest call already running at 99% of the old fixed budget — which is exactly why the budget became a knob.
+
+The honest caveat that shaped this design: the vendor documents *context rot* — accuracy falls as irrelevant state grows. So every enlargement is an **opt-in arm gated on measurement**: `arjev calibrate --replay-arms` re-scores your labeled candidates under each arm and reports Brier, reliability, and precision@5 with honest n. Defaults flip only on a measured win, and the tool never edits its own config.
+
 ## The division of labor
 
 Three sentences are the product:
 
 - **The decision model judges.** [Jev](https://typesafe.ai), the ranking model, is text-free by design: it scores, rescues, and rates with calibrated confidence, and it can never write a sentence. Every call is a typed decision, logged as a receipt.
 - **Your agent writes — or your own hand does.** All the prose in the loop (note bodies, why-lines, takes on the picks) comes from an LLM agent or from you. The tool itself never writes prose and never edits an existing note.
-- **The vault stays yours.** Your Obsidian vault is the source of truth: the taste profile is folded from your paper notes (tags, `why` lines, note bodies, wikilink signals), your authored **taste directives** state in plain English what you want, and papers you keep become ground truth. Slack is an optional attention layer on top — the vault is the product.
+- **The vault stays yours.** Your Obsidian vault is the source of truth: the taste profile is folded from your paper notes, your authored **taste directives** state in plain English what you want, and papers you keep become ground truth. Slack is an optional attention layer on top — the vault is the product.
 
 ## Two ways to start
 
@@ -37,9 +73,10 @@ Point it at any Obsidian vault with literature notes (a frontmatter `type` value
 ## The loop, and the staged worklist
 
 1. **Digest** — every day, the full multi-feed union is screened and ranked against the vault's taste profile; each pick carries its why-line.
-2. **Keep** — a Slack reaction, `arjev keep`, or a checkbox scaffolds the paper into your vault as a note with `status: staged` — metadata only, zero taste contribution until prose exists.
+2. **Keep** — a Slack reaction, `arjev keep`, or a checkbox scaffolds the paper into your vault as a note with `status: staged` — metadata only, zero taste contribution until prose exists. The staged gate is exact: an untouched stub provably changes nothing (the fold audits this every digest).
 3. **Write** — `arjev staged` lists the staged notes awaiting prose; your agent (or your hand) writes each note's body and `why` line, then flips `status: staged` → `status: written` in the frontmatter.
-4. **Learn** — a written body feeds taste exactly like a hand-authored note's; `arjev calibrate` replays past digests against your labels and reports Brier scores, reliability, precision@5 — with honest n, never fake confidence.
+4. **Enrich the library** — `arjev fetch <arxiv-id>` downloads the paper's PDF into your library and emits the extracted text alongside it; `arjev backfill` does the whole corpus at once (paced, idempotent, arXiv-polite). Library text is what gives each kept paper its abstract and conclusions inside the taste cards — a paper without it still counts, just with less to say.
+5. **Learn** — a written body feeds taste exactly like a hand-authored note's; `arjev calibrate` replays past digests against your labels and reports Brier scores, reliability, precision@5 — with honest n, never fake confidence.
 
 ## Why
 
@@ -47,7 +84,7 @@ Keyword-based paper alerts miss everything that isn't spelled the same way ("jit
 
 - **A decision model at the front line.** With a [Jev](https://typesafe.ai) key (the default), a cheap, calibrated model screens the **full feed** — every item, every day — so papers with zero keyword overlap still surface when they're relevant. Every call is a logged receipt.
 - **The vault still explains every pick.** Your taste profile supplies the matched terms on each why-line and the tiebreak — and it carries the whole digest without a key: no Jev, no outage, no problem; the ranking falls back to the deterministic lexical order and the `mode:` line says exactly which engine ran.
-- **A learning loop.** Keeps scaffold, writes feed taste, calibration reports the truth — the loop above, closing every day.
+- **A learning loop with a budget that scales.** The corpus grows, the context window doesn't — and every enlargement of that window earns its keep through measured calibration, not fashion.
 
 ## Seeding and taste
 
@@ -83,8 +120,10 @@ arJev's core is deliberately **text-free** — deterministic rendering, and the 
 
 `arjev calibrate` joins the label ledger, the digest journal, and the decision receipts: Brier per primitive, reliability bins, precision@5. The report states its n, names its censoring (labels only exist for papers you were shown), and recommends thresholds — **you** apply them; the tool never tunes itself.
 
+`arjev calibrate --replay-arms` goes one further: it re-assembles each labeled candidate's context under every state arm — the incumbent fixed budget, the budget-greedy policy, bigger windows, with and without candidate conclusions — re-scores them live, and reports the comparison. That report is the only road to changing a default in this tool.
+
 ## Status
 
-v0.3.0. v1 in daily use at [Harmoniqs](https://harmoniqs.ai). [Issue #1](https://github.com/harmoniqs/arJev/issues/1) is the plan of record (spec, compiled plan, obligation register).
+v0.3.0. v1 in daily use at [Harmoniqs](https://harmoniqs.ai). [Issue #1](https://github.com/harmoniqs/arJev/issues/1) is the plan of record (spec, compiled plan, obligation register); the context engine is [issue #75](https://github.com/harmoniqs/arJev/issues/75).
 
 Apache-2.0.

@@ -125,9 +125,10 @@ def keep(candidate: KeepCandidate, ledger: LabelLedger, cfg, today: date) -> Pat
 
 def fetch_pdf(arxiv: str, library_dir: Path, fetcher: Callable[[str], bytes] | None = None) -> Path:
     """Download the arXiv PDF into the content-addressed library (the acquisition
-    half of the record↔PDF join). The fetcher seam keeps CI offline. The fetch
-    path is arXiv-only and errors loudly on anything else — a future source
-    adapter owns its own fetcher and never rides this one silently."""
+    half of the record↔PDF join). The fetch path is arXiv-only and errors loudly on
+    anything else — a future source adapter owns its own fetcher and never rides
+    this one silently. The extracted .txt is emitted alongside (best-effort, the
+    paper_content ladder consumes it); extraction failure never fails the fetch."""
     if not _ARXIV_FETCH_FORM.match(arxiv.strip()):
         raise ValueError(f"fetch is arXiv-only — {arxiv!r} is not an arXiv id (source adapters own their fetchers)")
     library_dir.mkdir(parents=True, exist_ok=True)
@@ -136,6 +137,11 @@ def fetch_pdf(arxiv: str, library_dir: Path, fetcher: Callable[[str], bytes] | N
         return target
     fetcher = fetcher or _http_fetch
     target.write_bytes(fetcher(f"https://export.arxiv.org/pdf/{arxiv}"))
+    from .paper_content import pdf_text, write_library_text
+
+    text = pdf_text(target)
+    if text:
+        write_library_text(library_dir, arxiv, text)
     return target
 
 
