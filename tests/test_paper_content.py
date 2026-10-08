@@ -201,11 +201,12 @@ def test_fetch_pdf_extraction_failure_still_delivers_the_pdf(monkeypatch, tmp_pa
     assert not (library / "arxiv-2307.06618.txt").exists(), "no text is fabricated on extraction failure"
 
 
-def test_backfill_fetches_missing_and_writes_floor_for_failures(monkeypatch, tmp_path):
+def test_backfill_fetches_missing_and_stamps_canonical_abstracts(monkeypatch, tmp_path):
     isolate_state(monkeypatch, tmp_path)
     monkeypatch.setattr("arjev.paper_content.pdf_text", lambda data: _PAPER_TEXT)
-    monkeypatch.setattr("arjev.ingest.fetch_metadata",
-                        lambda ids: {i: {"title": "t", "abstract": f"api abstract for {i}"} for i in ids})
+
+    def fetch_meta(ids):
+        return {i: {"title": "t", "abstract": f"canonical api abstract for {i}"} for i in ids}
 
     def fetcher(url):
         arxiv = url.rsplit("/", 1)[-1]
@@ -217,12 +218,51 @@ def test_backfill_fetches_missing_and_writes_floor_for_failures(monkeypatch, tmp
     cfg = Config()
     cfg.roots = [str(VAULT)]
     cfg.library_dir = str(library)
-    result = backfill_corpus(cfg, pace_s=0.0, fetcher=fetcher, sleep=lambda s: None)
-    # a failed PDF fetch rides the API abstract floor instead of staying failed
-    assert "2601.01002" in result["api_only"]
-    assert result["failed"] == []
-    assert read_sections_cache("2601.01002")["abstract"]
+    result = backfill_corpus(cfg, pace_s=0.0, fetcher=fetcher, sleep=lambda s: None, fetch_meta=fetch_meta)
+    # every corpus id gained its canonical API abstract, fetched or not
+    assert result["abstracts_stamped"] == result["n_corpus"]
+    assert read_sections_cache("2601.01002")["abstract"] == "canonical api abstract for 2601.01002"
+    assert result["failed"] == ["2601.01002"], "a failed PDF fetch still has its abstract — only the text is missing"
     assert all((library / f"arxiv-{a}.txt").is_file() for a in result["fetched"]), "text rides every fetch"
+
+
+def test_backfill_abstract_stamping_is_idempotent(monkeypatch, tmp_path):
+    isolate_state(monkeypatch, tmp_path)
+    monkeypatch.setattr("arjev.paper_content.pdf_text", lambda data: _PAPER_TEXT)
+    calls = []
+
+    def fetch_meta(ids):
+        calls.append(list(ids))
+        return {i: {"title": "t", "abstract": f"api abstract {i}"} for i in ids}
+
+    cfg = Config()
+    cfg.roots = [str(VAULT)]
+    cfg.library_dir = str(tmp_path / "library")
+    first = backfill_corpus(cfg, pace_s=0.0, fetcher=lambda url: b"pdf", sleep=lambda s: None,
+                            fetch_meta=fetch_meta)
+    assert first["abstracts_stamped"] > 0
+    second = backfill_corpus(cfg, pace_s=0.0, fetcher=lambda url: b"pdf", sleep=lambda s: None,
+                             fetch_meta=fetch_meta)
+    assert second["abstracts_stamped"] == 0, "a cached canonical abstract is never re-stamped"
+    assert second["fetched"] == [], "and the library text is never re-fetched"
+    assert len(calls) == 1, "a fully-stamped corpus makes an idempotent backfill do zero network — no second API call"
+
+def test_corpus_content_merges_cache_abstract_with_library_conclusions(monkeypatch, tmp_path):
+    """Issue #79: a library hit with conclusions but no abstract must not discard the
+    cache's canonical API abstract — and the cache's abstract outranks the library's
+    extraction when both exist."""
+    isolate_state(monkeypatch, tmp_path)
+    library = tmp_path / "library"
+    library.mkdir()
+    (library / "arxiv-2307.06617.txt").write_text(
+        "6 Summary and outlook\n\n" + "A conclusions body long enough to clear the length floor check. " * 2)
+    write_sections_cache("2307.06617", {"abstract": "canonical api abstract"})
+    cfg = Config()
+    cfg.library_dir = str(library)
+    content = corpus_content(cfg)
+    entry = content["2307.06617"]
+    assert entry["abstract"] == "canonical api abstract", "the cache's canonical abstract survives the merge"
+    assert "conclusions body" in entry["conclusions"], "the library's conclusions ride alongside it"
 
 
 def test_backfill_requires_library_dir(tmp_path):
@@ -240,10 +280,13 @@ def test_backfill_is_idempotent_on_library_text(monkeypatch, tmp_path):
     library = tmp_path / "library"
     library.mkdir()
     (library / "arxiv-2601.01001.txt").write_text("already here")
+    meta_calls = []
     cfg = Config()
     cfg.roots = [str(VAULT)]
     cfg.library_dir = str(library)
     calls = []
-    result = backfill_corpus(cfg, pace_s=0.0, fetcher=lambda url: calls.append(url) or b"pdf", sleep=lambda s: None)
+    result = backfill_corpus(cfg, pace_s=0.0, fetcher=lambda url: calls.append(url) or b"pdf",
+                             sleep=lambda s: None, fetch_meta=lambda ids: (meta_calls.append(ids) or {}))
     assert "2601.01001" not in result["fetched"]
     assert (library / "arxiv-2601.01001.txt").read_text() == "already here", "existing text is never overwritten"
+    assert result["abstracts_stamped"] == 0 or meta_calls, "stamps come only from the injected API"

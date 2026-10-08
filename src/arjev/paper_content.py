@@ -143,9 +143,11 @@ def _cache_stem(arxiv: str) -> str:
 
 
 def corpus_content(cfg) -> dict[str, dict]:
-    """{arxiv: {abstract, conclusions}} for every library paper — the local source
-    ladder, no network. A PDF without its .txt pays extraction once and writes it
-    back; the sections cache is the abstract-only floor for fetch failures."""
+    """{arxiv: {abstract, conclusions}} for every locally-known paper — no network.
+    The two sources MERGE per id (issue #79: a library hit with conclusions but no
+    abstract must never discard the cache's canonical API abstract): the cache
+    supplies the abstract of record, the library text supplies the conclusions.
+    A PDF without its .txt pays extraction once and writes it back."""
     out: dict[str, dict] = {}
     cache_dir = sections_cache_dir()
     for cached in cache_dir.glob("*.json"):
@@ -166,9 +168,16 @@ def corpus_content(cfg) -> dict[str, dict]:
         text = ensure_library_text(library, arxiv)
         if text is None:
             continue
-        sections = {"abstract": extract_abstract(text), "conclusions": extract_conclusions(text)}
-        if sections["abstract"] or sections["conclusions"]:
-            out[arxiv] = {k: v for k, v in sections.items() if v}
+        # per-field precedence: the cache's abstract is canonical (the API's); the
+        # library's conclusions are fresher than a stale cache entry's
+        cached_entry = out.get(arxiv, {})
+        merged = {
+            "abstract": cached_entry.get("abstract") or extract_abstract(text),
+            "conclusions": extract_conclusions(text) or cached_entry.get("conclusions"),
+        }
+        merged = {k: v for k, v in merged.items() if v}
+        if merged:
+            out[arxiv] = merged
     return out
 
 
@@ -241,24 +250,45 @@ def paced_conclusions(ids, cache_dir: Path | None = None, pace_s: float = 3.0, s
 # ── the backfill: the explicit network path for corpus papers ─────────────────────
 
 
-def backfill_corpus(cfg, pace_s: float = 3.0, fetcher=None, sleep=None) -> dict:
-    """Fetch every corpus paper missing library text (PDF + .txt emission), with the
-    arXiv API abstract as the floor for fetch failures (sections cache). Paced,
-    idempotent, fail-open per paper. Returns {"fetched", "api_only", "failed"}.
-    The digest never calls this — backfill is an explicit human/agent command."""
+def backfill_corpus(cfg, pace_s: float = 3.0, fetcher=None, sleep=None, fetch_meta=None) -> dict:
+    """The explicit network path for corpus content. Two jobs, in order:
+
+    1. Canonical abstracts: the abstract of record is the arXiv API's, not a PDF
+       extraction's (pypdf usually drops the standalone "Abstract" heading — the
+       live backfill resolved 1 abstract per 12 texts). One batched call stamps the
+       API abstract into the sections cache for every corpus id lacking one.
+    2. Library text: fetch every paper missing its .txt (PDF + extraction), the
+       conclusions source. Paced, idempotent, fail-open per paper.
+
+    Returns {"abstracts_stamped", "fetched", "failed", "n_corpus"}. The digest never
+    calls this — backfill is an explicit human/agent command."""
     import time
 
     from .fold import fold_roots
     from .ingest import fetch_metadata
-    from .keep import fetch_pdf
 
+    fetch_meta = fetch_meta or fetch_metadata
     sleep = sleep or time.sleep
     fold = fold_roots(cfg.expanded_roots, cfg)
     library = Path(cfg.library_dir).expanduser() if cfg.library_dir else None
     if library is None:
         raise SystemExit("library_dir not configured — backfill needs a library to fetch into")
+    all_ids = sorted(fold.arxiv_ids())
+    # 1 — canonical abstracts: only the ids still missing one ride the batched call
+    # (a fully-stamped corpus makes an idempotent backfill do zero network)
+    need = [a for a in all_ids if not read_sections_cache(a).get("abstract")]
+    meta = fetch_meta(need) if need else {}
+    abstracts_stamped = 0
+    for arxiv in need:
+        abstract = (meta.get(arxiv) or {}).get("abstract")
+        if abstract:
+            write_sections_cache(arxiv, {"abstract": abstract[:ABSTRACT_CHARS]})
+            abstracts_stamped += 1
+    # 2 — library text for the papers missing it
+    from .keep import fetch_pdf
+
     missing = sorted(
-        arxiv for arxiv in fold.arxiv_ids()
+        arxiv for arxiv in all_ids
         if not (library / f"arxiv-{arxiv}.txt").is_file()
         and not (library / f"arxiv-{arxiv.replace('.', '-')}.txt").is_file()
     )
@@ -271,14 +301,5 @@ def backfill_corpus(cfg, pace_s: float = 3.0, fetcher=None, sleep=None) -> dict:
             fetched.append(arxiv)
         except Exception:
             failed.append(arxiv)
-    api_only = []
-    if failed:
-        # the abstract floor: an unfetchable PDF still carries its abstract via the API
-        meta = fetch_metadata(failed)
-        for arxiv in failed:
-            abstract = (meta.get(arxiv) or {}).get("abstract")
-            if abstract:
-                write_sections_cache(arxiv, {"abstract": extract_abstract(abstract) or abstract[:ABSTRACT_CHARS]})
-                api_only.append(arxiv)
-        failed = [a for a in failed if a not in api_only]
-    return {"fetched": fetched, "api_only": api_only, "failed": failed, "n_corpus": len(fold.papers)}
+    return {"abstracts_stamped": abstracts_stamped, "fetched": fetched, "failed": failed,
+            "n_corpus": len(fold.papers)}
