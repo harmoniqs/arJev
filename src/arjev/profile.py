@@ -77,10 +77,25 @@ def _tokens(text: str) -> list[str]:
 
 
 @dataclass
+class TasteCard:
+    """One kept paper as the Jev state rides it (the budget-greedy policy): the note's
+    why plus the paper's own abstract and conclusions/outlook excerpts, carrying the
+    note's decay × rating × graph weight — the same mult that scales its terms."""
+
+    title: str
+    why: str | None
+    abstract: str | None
+    conclusions: str | None
+    weight: float
+    read: date | None
+
+
+@dataclass
 class Profile:
     terms: dict[str, float] = field(default_factory=dict)
     author_terms: dict[str, float] = field(default_factory=dict)  # tracked people (issue #66)
     why_lines: list[tuple[date | None, str]] = field(default_factory=list)
+    cards: list[TasteCard] = field(default_factory=list)  # the greedy policy's taste unit
     recent_titles: list[str] = field(default_factory=list)
     note_count: int = 0
     degraded: bool = True
@@ -96,8 +111,11 @@ def _bump(profile: Profile, term: str, weight: float, mult: float, cfg) -> None:
         profile.terms[t] = profile.terms.get(t, 0.0) + weight * mult
 
 
-def build_profile(fold: FoldResult, cfg, now: date, directives=None) -> Profile:
-    """The lab's demonstrated taste. An untouched staged note contributes nothing."""
+def build_profile(fold: FoldResult, cfg, now: date, directives=None, content: dict[str, dict] | None = None) -> Profile:
+    """The lab's demonstrated taste. An untouched staged note contributes nothing.
+    `content` is the paper-content ladder's local resolution ({arxiv: {abstract,
+    conclusions}}) — cards ride without it (title + why), the paper's own words only
+    when the library or the sections cache holds them."""
     profile = Profile()
     from .directives import load_directives
 
@@ -133,6 +151,16 @@ def build_profile(fold: FoldResult, cfg, now: date, directives=None) -> Profile:
         # the human's own verdict pulls harder: core 1.5x, marginal 0.5x
         rating_mult = RATING_WEIGHT.get(note.rating or "", 1.0)
         mult = rating_mult * _decay(note.read_date, now, cfg.half_life_days) * (1 + 0.5 * min(3, note.inlinks))
+        paper_content = (content or {}).get(note.arxiv or "", {})
+        if note.why or paper_content:
+            profile.cards.append(TasteCard(
+                title=note.title,
+                why=note.why,
+                abstract=paper_content.get("abstract"),
+                conclusions=paper_content.get("conclusions"),
+                weight=mult,
+                read=note.read_date,
+            ))
         for tag in note.tags:
             _bump(profile, tag, TAG_WEIGHT, mult, cfg)
         for tok in _tokens(note.title) + _tokens(_clean_body(note.body)):
@@ -142,6 +170,7 @@ def build_profile(fold: FoldResult, cfg, now: date, directives=None) -> Profile:
         if note.why:
             profile.why_lines.append((note.read_date, note.why))
     profile.why_lines.sort(key=lambda pair: pair[0] or date.min, reverse=True)
+    profile.cards.sort(key=lambda c: (-c.weight, c.title))
     _cap_corpus_generic_terms(profile, body_sourced, contributing)
     dated = sorted(contributing, key=lambda p: p.read_date or date.min, reverse=True)
     profile.recent_titles = [p.title for p in dated[:3]]

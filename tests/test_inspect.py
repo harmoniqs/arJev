@@ -19,7 +19,8 @@ from conftest import RSS, TODAY, VAULT, isolate_state
 # the comment structure is the contract the runbook cites slot-by-slot)
 CHECKLIST_SLOTS = [
     "roots", "include", "type", "half_life_days", "feeds", "top", "screen", "probe_k",
-    "directives_path", "identity", "read_date", "rating", "why", "tags", "status",
+    "directives_path", "state_policy", "taste_budget_bytes", "candidate_content",
+    "identity", "read_date", "rating", "why", "tags", "status",
     "digest_dir", "library_dir",
 ]
 
@@ -93,6 +94,7 @@ def test_fold_view_block_on_the_fixture_vault():
         "fold type-matched: 7",
         "fold identity-bearing: 7",
         "fold profile-terms: 69",
+        "fold taste-cards: 3",
         "fold staged: 1",
         "fold directives: none",
         "fold warnings: none",

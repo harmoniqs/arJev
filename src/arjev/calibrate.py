@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from .config import Config
 from .fold import FoldResult
+from .jev import StatePolicy
 from .ledger import Label, LabelLedger
 from .profile import staged_audit
 from .rerank import journal_path, state_dir
@@ -56,7 +57,7 @@ class Report:
 def calibrate(cfg: Config, fold: FoldResult, runs: int = 30) -> Report:
     report = Report()
     journal = _load_journal(runs)
-    receipts = _load_receipts()
+    receipts = _latest_receipts(_load_receipts())
     ledger = LabelLedger()
 
     labels_by_id: dict[str, list[Label]] = {}
@@ -199,6 +200,120 @@ def _probe_lift(journal: list[dict], labels_by_id: dict) -> dict:
         "survivor_n": survivor_n,
         "lexical_zero_baseline": "zero rescues by construction (the probe pool scores 0)",
     }
+
+
+# ── the arms instrument (issue #75: the A/B that gates every default flip) ───────
+
+
+def state_arms() -> list[tuple[str, StatePolicy]]:
+    """The A/B matrix. The hard cap scales WITH the arm — a bigger taste budget
+    under the incumbent 4096 cap would collapse every arm to the same backstopped
+    state and measure nothing (caught in review)."""
+    def greedy(budget: int, content: bool) -> StatePolicy:
+        return StatePolicy(policy="budget-greedy", taste_budget=budget, hard_cap=budget + 4096,
+                           candidate_conclusions=content)
+
+    return [
+        ("fixed-15/4KB", StatePolicy()),
+        ("fixed-15/4KB+content", StatePolicy(candidate_conclusions=True)),
+        ("greedy/4KB", greedy(2500, False)),
+        ("greedy/4KB+content", greedy(2500, True)),
+        ("greedy/8KB", greedy(8000, False)),
+        ("greedy/8KB+content", greedy(8000, True)),
+        ("greedy/12KB", greedy(12000, False)),
+        ("greedy/12KB+content", greedy(12000, True)),
+    ]
+
+
+def calibrate_arms(cfg: Config, fold: FoldResult, client, fetch_metadata, runs: int = 30) -> Report:
+    """Re-assemble and re-score journaled, LABELED candidates under each state arm —
+    the instrument that decides whether budget-greedy and candidate content earn a
+    default flip (context rot is real; evidence, not economics, decides). Honest n
+    is labeled candidates only; arm receipts land in a separate arms file, never
+    the production join. `fetch_metadata`, the client, and the conclusions warm-up
+    are injectable/seamed (CI offline)."""
+    from .jev import assemble_state, write_receipts
+    from .paper_content import corpus_content, paced_conclusions, read_sections_cache, sections_cache_dir
+    from .profile import build_profile
+    from .rerank import state_dir
+
+    report = Report()
+    journal = _load_journal(runs)
+    ledger = LabelLedger()
+    labels_by_id: dict[str, list[Label]] = {}
+    for label in ledger.rows():
+        labels_by_id.setdefault(label.arxiv_id, []).append(label)
+    # journaled candidates that carry a gradeable label — the honest n
+    journal_titles = {c["arxiv"]: c.get("title", "")
+                      for line in journal for c in line.get("candidates", []) if c.get("title")}
+    labeled = {arxiv: outcome for arxiv in journal_titles
+               if (outcome := _positive(labels_by_id.get(arxiv, []))) is not None}
+    if not labeled:
+        report.notes.append(
+            "replay-arms: n = 0 — no journaled candidate carries a gradeable label yet; "
+            "the arms are unmeasured, not refuted (collect keeps/skips first)."
+        )
+        report.metrics["replay_arms"] = {"n": 0}
+        return report
+    meta = fetch_metadata(sorted(labeled))
+    profile = build_profile(fold, cfg, _today(), content=corpus_content(cfg))
+    arms = state_arms()
+    # conclusions are arm-independent: warm the shared cache ONCE, paced — never a
+    # burst per arm
+    if any(policy.candidate_conclusions for _, policy in arms):
+        paced_conclusions(sorted(labeled), sections_cache_dir(), pace_s=cfg.candidate_pace_s)
+    arm_receipts: list = []
+    run_id = f"arms-{_today().isoformat()}"
+    for name, policy in arms:
+        pairs: list[tuple[float, int]] = []
+        state_bytes: list[int] = []
+        for arxiv, outcome in labeled.items():
+            m = meta.get(arxiv) or {}
+            item = _JournalCandidate(title=journal_titles.get(arxiv) or m.get("title") or "",
+                                     authors=[], abstract=m.get("abstract") or "", arxiv=arxiv)
+            conclusions = (read_sections_cache(arxiv).get("conclusions")
+                           if policy.candidate_conclusions else None)
+            assembly = assemble_state(profile, item, policy, conclusions)
+            if assembly.state is None:
+                continue
+            state_bytes.append(assembly.state_bytes)
+            answer = client.score_relevance(assembly.state, arxiv, run_id, arm_receipts)
+            if not answer.ok:
+                continue
+            pairs.append((_p_positive({"primitive": "score", "distribution": answer.distribution}), outcome))
+        report.metrics[f"arm_{name}"] = {
+            "brier": round(sum((p - o) ** 2 for p, o in pairs) / len(pairs), 4) if pairs else None,
+            "n": len(pairs),
+            "mean_state_bytes": round(sum(state_bytes) / len(state_bytes)) if state_bytes else None,
+        }
+    if arm_receipts:
+        write_receipts(state_dir() / "arms", arm_receipts)
+    report.notes.append(
+        f"replay-arms: {len(labeled)} labeled candidate(s) re-scored per arm from the CURRENT "
+        "fold (state assembly is the live corpus, not the historical one — a first "
+        "reading, not a verdict); arm receipts: arms/ under the state dir."
+    )
+    report.notes.append("defaults flip on a measured win here; the tool never edits config.")
+    return report
+
+
+class _JournalCandidate:
+    """assemble_state's candidate seam: it reads .item.{title, authors, abstract, arxiv}."""
+
+    def __init__(self, title: str, authors: list[str], abstract: str, arxiv: str):
+        from types import SimpleNamespace
+
+        self.item = SimpleNamespace(title=title, authors=authors, abstract=abstract, arxiv=arxiv)
+
+
+def _latest_receipts(receipts: list[dict]) -> list[dict]:
+    """The two-pass finalist enrichment appends a second score receipt for re-scored
+    candidates — the enriched call supersedes (it is the judgment the digest acted
+    on), so the calibration join keeps the LAST receipt per (run_id, candidate)."""
+    latest: dict[tuple[str, str], dict] = {}
+    for r in receipts:
+        latest[(r.get("run_id", ""), r["candidate_arxiv"])] = r
+    return list(latest.values())
 
 
 # ── loaders ─────────────────────────────────────────────────────────────────────

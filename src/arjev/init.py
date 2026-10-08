@@ -32,6 +32,14 @@ probe_k = 20
 # directives_path — your taste directives, written in plain English; default: arjev-directives.md at the first root.
 # directives_path = "/absolute/path/to/arjev-directives.md"
 
+[jev]
+# state_policy — the taste-context assembly: "fixed-15" (incumbent) or "budget-greedy".
+state_policy = "fixed-15"
+# taste_budget_bytes — the taste half of the Jev state, filled by the greedy policy.
+taste_budget_bytes = 2500
+# candidate_content — ride each finalist's fetched conclusions/outlook in its state.
+# candidate_content = true
+
 [vault.fields]
 # identity — frontmatter field(s) holding the paper id; the first present one wins.
 identity = ["arxiv", "doi"]

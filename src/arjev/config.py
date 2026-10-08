@@ -43,6 +43,10 @@ class Config:
     note_template: str | None = None
     jev_min_confidence: float = 0.6
     ranking: str = "jev-first"  # jev-first | lexical-first
+    state_policy: str = "fixed-15"  # fixed-15 | budget-greedy (the Jev state assembly)
+    taste_budget_bytes: int = 2500  # the taste half of the Jev state, greedy policy
+    candidate_content: bool = False  # finalist conclusions enrichment (candidate half)
+    candidate_pace_s: float = 3.0  # politeness gap between candidate PDF fetches
     directives_path: str | None = None  # default: <roots[0]>/arjev-directives.md
     enrich_command: str | None = None  # the text-generation seam (docs/amicode-integration.md)
     jev_pace_s: float = 0.05  # politeness gap between Jev calls in jev-first
@@ -96,6 +100,12 @@ def load_config(path: Path | None = None) -> Config:
     if cfg.ranking not in ("jev-first", "lexical-first"):
         raise ValueError(f"ranking must be jev-first or lexical-first, got {cfg.ranking!r}")
     cfg.jev_pace_s = float(jev.get("pace_s", cfg.jev_pace_s))
+    cfg.state_policy = str(jev.get("state_policy", cfg.state_policy))
+    if cfg.state_policy not in ("fixed-15", "budget-greedy"):
+        raise ValueError(f"state_policy must be fixed-15 or budget-greedy, got {cfg.state_policy!r}")
+    cfg.taste_budget_bytes = int(jev.get("taste_budget_bytes", cfg.taste_budget_bytes))
+    cfg.candidate_content = bool(jev.get("candidate_content", cfg.candidate_content))
+    cfg.candidate_pace_s = float(jev.get("candidate_pace_s", cfg.candidate_pace_s))
     cfg.directives_path = raw.get("directives_path") or vault.get("directives_path")
     cfg.enrich_command = raw.get("enrich_command") or vault.get("enrich_command")
     slack = raw.get("slack", {})

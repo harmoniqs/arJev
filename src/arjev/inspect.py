@@ -69,6 +69,10 @@ def _checklist_lines(cfg: Config) -> list[str]:
         ("screen", True, str(cfg.screen)),
         ("probe_k", True, str(cfg.probe_k)),
         ("directives_path", cfg.directives_path is not None, cfg.directives_path or ""),
+        ("state_policy", True, cfg.state_policy),
+        ("taste_budget_bytes", True, str(cfg.taste_budget_bytes)),
+        ("candidate_content", cfg.candidate_content,
+         "finalist conclusions enrichment" if cfg.candidate_content else ""),
         ("identity", bool(cfg.fields["identity"]), ", ".join(cfg.fields["identity"])),
         ("read_date", True, cfg.fields["read_date"]),
         ("rating", True, cfg.fields["rating"]),
@@ -92,6 +96,7 @@ def _fold_lines(fold: FoldResult, profile: Profile, staged: int, directives: Dir
         f"fold type-matched: {fold.type_matched}",
         f"fold identity-bearing: {len(fold.papers)}",
         f"fold profile-terms: {len(profile.terms)}",
+        f"fold taste-cards: {len(profile.cards)}",
         f"fold staged: {staged}",
     ]
     if directives.present:
