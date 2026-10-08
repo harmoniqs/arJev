@@ -61,7 +61,7 @@ Three sentences are the product:
 Python 3.11+:
 
 ```bash
-uv tool install git+https://github.com/harmoniqs/arJev@v0.3.0
+uv tool install git+https://github.com/harmoniqs/arJev@v0.4.0
 arjev init --vault /path/to/your/vault  # writes the checklist-file config
 # fill feeds = [...] with your arXiv categories — yours or your agent's hand
 arjev inspect                           # proves the config green (exit 0)
@@ -126,6 +126,6 @@ One network disclosure: corpus content resolves from local files only. The candi
 
 ## Status
 
-v0.3.0. v1 in daily use at [Harmoniqs](https://harmoniqs.ai). [Issue #1](https://github.com/harmoniqs/arJev/issues/1) is the plan of record (spec, compiled plan, obligation register); the context engine is [issue #75](https://github.com/harmoniqs/arJev/issues/75).
+v0.4.0. v1 in daily use at [Harmoniqs](https://harmoniqs.ai). [Issue #1](https://github.com/harmoniqs/arJev/issues/1) is the plan of record (spec, compiled plan, obligation register); the context engine is [issue #75](https://github.com/harmoniqs/arJev/issues/75).
 
 Apache-2.0.
