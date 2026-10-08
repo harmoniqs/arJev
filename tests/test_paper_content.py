@@ -275,6 +275,23 @@ def test_backfill_requires_library_dir(tmp_path):
         assert "library_dir" in str(exc)
 
 
+def test_backfill_cli_report_line_matches_the_schema(monkeypatch, tmp_path, capsys):
+    """Issue #81 regression: the CLI report line drifted from backfill_corpus's
+    return schema and the command crashed printing its own report. This smoke pins
+    the printed line to the schema backfill_corpus actually returns."""
+    import arjev.paper_content as pc
+
+    monkeypatch.setattr(pc, "backfill_corpus", lambda cfg, pace_s=3.0: {
+        "abstracts_stamped": 2, "fetched": ["2601.01001"], "failed": [], "n_corpus": 7})
+    from arjev.cli import main
+
+    config = tmp_path / "arjev.toml"
+    config.write_text('[vault]\nroots = []\nfeeds = []\n')
+    assert main(["backfill", "--config", str(config), "--pace-s", "0"]) == 0
+    out = capsys.readouterr().out
+    assert "abstracts stamped 2" in out and "text fetched 1" in out and "failed 0" in out
+
+
 def test_backfill_is_idempotent_on_library_text(monkeypatch, tmp_path):
     isolate_state(monkeypatch, tmp_path)
     library = tmp_path / "library"
