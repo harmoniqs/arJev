@@ -114,7 +114,7 @@ def sections_cache_dir() -> Path:
 
 
 def read_sections_cache(arxiv: str, cache_dir: Path | None = None) -> dict:
-    path = (cache_dir or sections_cache_dir()) / f"{arxiv}.json"
+    path = (cache_dir or sections_cache_dir()) / f"{_cache_stem(arxiv)}.json"
     if not path.is_file():
         return {}
     try:
@@ -125,12 +125,18 @@ def read_sections_cache(arxiv: str, cache_dir: Path | None = None) -> dict:
 
 
 def write_sections_cache(arxiv: str, sections: dict, cache_dir: Path | None = None) -> Path:
-    path = (cache_dir or sections_cache_dir()) / f"{arxiv}.json"
+    # slash-form ids (math/9701001) must stay flat filenames — the real id rides
+    # inside the JSON so the corpus resolution can key by it, never by the slug
+    path = (cache_dir or sections_cache_dir()) / f"{_cache_stem(arxiv)}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(sections, sort_keys=True))
+    tmp.write_text(json.dumps({**sections, "arxiv": arxiv}, sort_keys=True))
     tmp.replace(path)
     return path
+
+
+def _cache_stem(arxiv: str) -> str:
+    return arxiv.replace("/", "-")
 
 
 # ── the corpus half: local-only resolution at digest time ─────────────────────────
@@ -144,8 +150,10 @@ def corpus_content(cfg) -> dict[str, dict]:
     cache_dir = sections_cache_dir()
     for cached in cache_dir.glob("*.json"):
         data = read_sections_cache(cached.stem, cache_dir)
-        if data.get("abstract") or data.get("conclusions"):
-            out[cached.stem] = {k: data.get(k) for k in ("abstract", "conclusions")}
+        if not (data.get("abstract") or data.get("conclusions")):
+            continue
+        # the id of record rides inside the JSON — a slug never becomes the join key
+        out[data.get("arxiv", cached.stem)] = {k: data.get(k) for k in ("abstract", "conclusions")}
     library = Path(cfg.library_dir).expanduser() if cfg.library_dir else None
     if library is None:
         return out
@@ -155,7 +163,7 @@ def corpus_content(cfg) -> dict[str, dict]:
         if arxiv is None or arxiv in seen:
             continue
         seen.add(arxiv)
-        text = _library_text(library, arxiv)
+        text = ensure_library_text(library, arxiv)
         if text is None:
             continue
         sections = {"abstract": extract_abstract(text), "conclusions": extract_conclusions(text)}
@@ -164,9 +172,11 @@ def corpus_content(cfg) -> dict[str, dict]:
     return out
 
 
-def _library_text(library: Path, arxiv: str) -> str | None:
-    # both on-disk .txt conventions: the dot form (arxiv-1310.8465) and the
-    # dot-flattened dash form (arxiv-1310-8465)
+def ensure_library_text(library: Path, arxiv: str) -> str | None:
+    """The library text for a paper, paying extraction exactly once: read the .txt
+    (both on-disk conventions) if present, else extract from the PDF and write it
+    back. Digest and fetch/backfill share this seam, so a pre-feature PDF gains its
+    .txt on first touch from either side."""
     for txt in (library / f"arxiv-{arxiv}.txt", library / f"arxiv-{arxiv.replace('.', '-')}.txt"):
         if txt.is_file():
             return txt.read_text(errors="replace")
@@ -184,7 +194,10 @@ def candidate_conclusions(
 ) -> str | None:
     """Conclusions excerpt for a feed candidate. Cached excerpts are reused; a miss
     fetches the PDF, extracts, and caches — successes only, so a transient failure
-    retries tomorrow. The PDF itself is never stored: the library stays keep-only."""
+    retries tomorrow. Transport and parse failures are caught HERE (the fetch is the
+    one network surface on the digest path — a dead proxy must never kill a digest;
+    it fails open to None like every other content miss). The PDF itself is never
+    stored: the library stays keep-only."""
     cache_dir = cache_dir or sections_cache_dir()
     cached = read_sections_cache(arxiv, cache_dir)
     if cached.get("conclusions"):
@@ -193,11 +206,36 @@ def candidate_conclusions(
         from .keep import _http_fetch
 
         fetcher = _http_fetch
-    text = pdf_text(fetcher(f"https://export.arxiv.org/pdf/{arxiv}"))
+    try:
+        text = pdf_text(fetcher(f"https://export.arxiv.org/pdf/{arxiv}"))
+    except Exception:
+        return None  # transport/parse fail-open: cache nothing, retry tomorrow
     conclusions = extract_conclusions(text, cap) if text else None
     if conclusions:
         write_sections_cache(arxiv, {**cached, "conclusions": conclusions}, cache_dir)
     return conclusions
+
+
+def paced_conclusions(ids, cache_dir: Path | None = None, pace_s: float = 3.0, sleep=None,
+                      fetcher=None) -> dict[str, str]:
+    """The single politeness seam both call sites route through (digest enrichment,
+    replay-arms warming): cache hits are free, sleeps come ONLY after real fetch
+    attempts — success or failure, the arXiv hit happened. Fail-open per id."""
+    import time
+
+    sleep = sleep or time.sleep
+    out: dict[str, str] = {}
+    for i, arxiv in enumerate(ids):
+        cached = read_sections_cache(arxiv, cache_dir).get("conclusions")
+        if cached is not None:
+            out[arxiv] = cached
+            continue
+        conclusions = candidate_conclusions(arxiv, cache_dir, fetcher=fetcher)
+        if conclusions:
+            out[arxiv] = conclusions
+        if i < len(ids) - 1:
+            sleep(pace_s)
+    return out
 
 
 # ── the backfill: the explicit network path for corpus papers ─────────────────────

@@ -188,10 +188,12 @@ def _rescore_finalists(evaluated, scored_by_id, client, profile, run_id, receipt
             continue
         before = len(receipts)
         answer = client.score_relevance(assembly.state, p.identity.id, run_id, receipts)
+        if not answer.ok:
+            # the first-pass mass stands, so the FIRST-pass receipt is the judgment
+            # the digest acted on — a failed re-score never supersedes the journal
+            continue
         if len(receipts) > before:
             receipt_of[p.identity] = receipts[before]
-        if not answer.ok:
-            continue
         mass = answer.distribution.get("must-read", 0.0) + answer.distribution.get("worth-reading", 0.0)
         p.jev_primary = mass
         fail_reasons.pop(p.identity, None)

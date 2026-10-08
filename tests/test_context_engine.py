@@ -10,6 +10,7 @@ from datetime import date
 
 from arjev.config import Config
 from arjev.feed import FeedItem
+from arjev.fold import fold_roots
 from arjev.jev import HARD_CAP, StatePolicy, assemble_state
 from arjev.profile import Profile, TasteCard, build_profile
 from arjev.score import score_item
@@ -21,8 +22,7 @@ GREEDY_CONTENT = StatePolicy(policy="budget-greedy", candidate_conclusions=True)
 
 
 def _profile_for():
-    return build_profile(__import__("arjev.fold", fromlist=["fold_roots"]).fold_roots([VAULT], Config()),
-                         Config(), TODAY)
+    return build_profile(fold_roots([VAULT], Config()), Config(), TODAY)
 
 
 def _candidate(arxiv="2601.01011"):
@@ -155,7 +155,7 @@ def test_jev_first_enrichment_fail_open_keeps_first_pass_mass(monkeypatch, tmp_p
     isolate_state(monkeypatch, tmp_path)
     from arjev.digest import run_digest
 
-    monkeypatch.setattr("arjev.digest.candidate_conclusions", lambda arxiv, cache_dir: None)
+    monkeypatch.setattr("arjev.digest.paced_conclusions", lambda ids, cache_dir, pace_s: {})
     transport = FakeTransport()
     cfg = digest_cfg()
     cfg.candidate_content = True
@@ -197,13 +197,15 @@ def test_calibrate_arms_reports_n_zero_honestly(monkeypatch, tmp_path):
 
 def test_calibrate_arms_rescores_labeled_candidates_per_arm(monkeypatch, tmp_path):
     """A labeled, journaled candidate: each arm re-scores it once — the A/B the
-    default flip gates on, with n stated."""
+    default flip gates on, with n stated. The conclusions cache is pre-populated so
+    the warm-up never touches the network from the suite."""
     isolate_state(monkeypatch, tmp_path)
     from arjev.calibrate import calibrate_arms
-    from arjev.fold import fold_roots
     from arjev.ledger import Label, LabelLedger, now_ts
+    from arjev.paper_content import write_sections_cache
     from arjev.rerank import journal_path
 
+    write_sections_cache("2601.01011", {"conclusions": "outlook: the two-cat unit cell next."})
     ledger = LabelLedger()
     ledger.append(Label(arxiv_id="2601.01011", label_type="keep", source="cli-keep", ts=now_ts()))
     journal_path().parent.mkdir(parents=True, exist_ok=True)
@@ -215,14 +217,39 @@ def test_calibrate_arms_rescores_labeled_candidates_per_arm(monkeypatch, tmp_pat
     }) + "\n")
     transport = FakeTransport()
     cfg = digest_cfg()
+    cfg.candidate_pace_s = 0.0
     report = calibrate_arms(cfg, fold_roots(cfg.expanded_roots, cfg), client(transport),
                             lambda ids: {i: {"title": "t", "abstract": "a"} for i in ids}, runs=5)
     arm_metrics = {k: v for k, v in report.metrics.items() if k.startswith("arm_")}
-    assert len(arm_metrics) == 6, "fixed-15 / greedy@4KB / greedy@8KB × content on/off"
+    assert len(arm_metrics) == 8, "fixed-15 / greedy@4K / 8K / 12KB × content on/off"
     assert all(v["n"] == 1 for v in arm_metrics.values())
     assert all(v["brier"] is not None for v in arm_metrics.values())
+    assert all(v["mean_state_bytes"] for v in arm_metrics.values()), "the realized state size rides every arm"
+    enriched = [p for p in transport.calls if p["state"]["candidate"].get("conclusions")]
+    assert len(enriched) == 4, "exactly the four +content arms ride candidate conclusions"
     arms_receipts = (tmp_path / "state" / "arjev" / "arms" / "jev-receipts.jsonl")
     assert arms_receipts.is_file(), "arm receipts never join the production file"
-    assert len(arms_receipts.read_text().splitlines()) >= 6
+    assert len(arms_receipts.read_text().splitlines()) >= 8
     production = tmp_path / "state" / "arjev" / "jev-receipts.jsonl"
     assert not production.is_file(), "the arms run must not touch the production receipts"
+
+
+def test_state_arms_scale_their_hard_cap_with_the_budget():
+    """Review regression: the >4KB arms kept the incumbent 4096 hard cap and every
+    arm collapsed to the same backstopped state — the A/B would have measured
+    nothing. The cap must grow with the budget."""
+    from arjev.calibrate import state_arms
+
+    arms = state_arms()
+    greedy_arms = [(name, policy) for name, policy in arms if policy.policy == "budget-greedy"]
+    budgets = [policy.taste_budget for _, policy in greedy_arms]
+    caps = [policy.hard_cap for _, policy in greedy_arms]
+    assert budgets == sorted(budgets)
+    assert all(cap == budget + 4096 for budget, cap in zip(budgets, caps, strict=True))
+    # and a corpus that fills the budgets actually realizes the difference
+    fat = Profile(directives_body="d" * 400)
+    fat.cards = [TasteCard(f"paper {i:02d}", "why " * 20, "abstract " * 20, "conclusions " * 20,
+                           1.0 - i / 50, TODAY) for i in range(40)]
+    small = assemble_state(fat, _candidate(), greedy_arms[0][1]).state_bytes
+    large = assemble_state(fat, _candidate(), greedy_arms[-1][1]).state_bytes
+    assert large > small * 2, "the 12KB arm must carry materially more taste than the 4KB arm"

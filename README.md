@@ -25,20 +25,20 @@ The corpus never rides into the model wholesale: the fold is a local, linear sca
 
 What the window holds, per budget (generic):
 
-| Budget | What rides |
+| Taste budget | What rides |
 |---|---|
 | 2.5 KB (default) | full directives + ~15 weighted terms + recent why-lines |
 | 8 KB | full directives + ~4–6 recent taste cards (abstract + conclusions + why) + terms |
-| 12 KB | full directives + ~8–10 cards + terms — still under 5% of the model's context window |
+| 12 KB | full directives + ~8–10 cards + terms — around 12% of the model's context window |
 
 What it costs (measured in daily use at [Harmoniqs](https://harmoniqs.ai), three feeds):
 
 - **~650–980 papers screened per day** — every item in the multi-feed union is scored; the full feed is never truncated.
 - **~470 model calls per digest** (every eligible item is screened by [Jev](https://typesafe.ai), the calibrated ranking model), **median 171 ms** per call, p90 212 ms.
-- **~$0.02/day** at the default budget; the largest tested arm (~12 KB states) is still ~$0.06/day. The model's own window is 32k tokens — the largest arm uses single-digit percent of it.
+- **~$0.02/day** at the default budget; the largest arm (a 12 KB taste budget) is still ~$0.08/day. The model's own window is 32k tokens — the largest arm uses about an eighth of it.
 - **105 paper notes, a 64-PDF library**, and a median digest call already running at 99% of the old fixed budget — which is exactly why the budget became a knob.
 
-The honest caveat that shaped this design: the vendor documents *context rot* — accuracy falls as irrelevant state grows. So every enlargement is an **opt-in arm gated on measurement**: `arjev calibrate --replay-arms` re-scores your labeled candidates under each arm and reports Brier, reliability, and precision@5 with honest n. Defaults flip only on a measured win, and the tool never edits its own config.
+The honest caveat that shaped this design: the vendor documents *context rot* — accuracy falls as irrelevant state grows. So every enlargement is an **opt-in arm gated on measurement**: `arjev calibrate --replay-arms` re-scores your labeled candidates under each arm and reports Brier, precision@5, and the realized state size per arm, with honest n. Defaults flip only on a measured win, and the tool never edits its own config.
 
 ## The division of labor
 
@@ -75,7 +75,7 @@ Point it at any Obsidian vault with literature notes (a frontmatter `type` value
 1. **Digest** — every day, the full multi-feed union is screened and ranked against the vault's taste profile; each pick carries its why-line.
 2. **Keep** — a Slack reaction, `arjev keep`, or a checkbox scaffolds the paper into your vault as a note with `status: staged` — metadata only, zero taste contribution until prose exists. The staged gate is exact: an untouched stub provably changes nothing (the fold audits this every digest).
 3. **Write** — `arjev staged` lists the staged notes awaiting prose; your agent (or your hand) writes each note's body and `why` line, then flips `status: staged` → `status: written` in the frontmatter.
-4. **Enrich the library** — `arjev fetch <arxiv-id>` downloads the paper's PDF into your library and emits the extracted text alongside it; `arjev backfill` does the whole corpus at once (paced, idempotent, arXiv-polite). Library text is what gives each kept paper its abstract and conclusions inside the taste cards — a paper without it still counts, just with less to say.
+4. **Enrich the library** — `arjev fetch <arxiv-id>` downloads the paper's PDF into your library and emits the extracted text alongside it; `arjev backfill` does the whole corpus at once (paced, idempotent, arXiv-polite, converging on libraries that predate it). Library text is what gives each kept paper its abstract and conclusions inside the taste cards — a paper without it still counts, just with less to say. (A digest under the greedy policy also pays a missing PDF's extraction once, writing the `.txt` back — idempotent, same content fetch would write.)
 5. **Learn** — a written body feeds taste exactly like a hand-authored note's; `arjev calibrate` replays past digests against your labels and reports Brier scores, reliability, precision@5 — with honest n, never fake confidence.
 
 ## Why
@@ -120,7 +120,9 @@ arJev's core is deliberately **text-free** — deterministic rendering, and the 
 
 `arjev calibrate` joins the label ledger, the digest journal, and the decision receipts: Brier per primitive, reliability bins, precision@5. The report states its n, names its censoring (labels only exist for papers you were shown), and recommends thresholds — **you** apply them; the tool never tunes itself.
 
-`arjev calibrate --replay-arms` goes one further: it re-assembles each labeled candidate's context under every state arm — the incumbent fixed budget, the budget-greedy policy, bigger windows, with and without candidate conclusions — re-scores them live, and reports the comparison. That report is the only road to changing a default in this tool.
+`arjev calibrate --replay-arms` goes one further: it re-assembles each labeled candidate's context under every state arm — the incumbent fixed budget, the budget-greedy policy at 4/8/12 KB, each with and without candidate conclusions — re-scores them live (conclusions fetched once, paced, from the shared cache), and reports Brier, n, and the realized state size per arm. That report is the only road to changing a default in this tool.
+
+One network disclosure: corpus content resolves from local files only. The candidate-content arm is the one fetch a digest can make — bounded to the finalists, paced at 3 s, cached in the state dir, and fail-open: a dead network degrades that arm to abstract-only and the digest still ships, with the `mode:` line saying what ran.
 
 ## Status
 

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from .config import Config
 from .fold import FoldResult
+from .jev import StatePolicy
 from .ledger import Label, LabelLedger
 from .profile import staged_audit
 from .rerank import journal_path, state_dir
@@ -204,14 +205,35 @@ def _probe_lift(journal: list[dict], labels_by_id: dict) -> dict:
 # ── the arms instrument (issue #75: the A/B that gates every default flip) ───────
 
 
+def state_arms() -> list[tuple[str, StatePolicy]]:
+    """The A/B matrix. The hard cap scales WITH the arm — a bigger taste budget
+    under the incumbent 4096 cap would collapse every arm to the same backstopped
+    state and measure nothing (caught in review)."""
+    def greedy(budget: int, content: bool) -> StatePolicy:
+        return StatePolicy(policy="budget-greedy", taste_budget=budget, hard_cap=budget + 4096,
+                           candidate_conclusions=content)
+
+    return [
+        ("fixed-15/4KB", StatePolicy()),
+        ("fixed-15/4KB+content", StatePolicy(candidate_conclusions=True)),
+        ("greedy/4KB", greedy(2500, False)),
+        ("greedy/4KB+content", greedy(2500, True)),
+        ("greedy/8KB", greedy(8000, False)),
+        ("greedy/8KB+content", greedy(8000, True)),
+        ("greedy/12KB", greedy(12000, False)),
+        ("greedy/12KB+content", greedy(12000, True)),
+    ]
+
+
 def calibrate_arms(cfg: Config, fold: FoldResult, client, fetch_metadata, runs: int = 30) -> Report:
     """Re-assemble and re-score journaled, LABELED candidates under each state arm —
     the instrument that decides whether budget-greedy and candidate content earn a
     default flip (context rot is real; evidence, not economics, decides). Honest n
     is labeled candidates only; arm receipts land in a separate arms file, never
-    the production join. `fetch_metadata` and the client are injectable (CI offline)."""
-    from .jev import StatePolicy, assemble_state
-    from .paper_content import candidate_conclusions
+    the production join. `fetch_metadata`, the client, and the conclusions warm-up
+    are injectable/seamed (CI offline)."""
+    from .jev import assemble_state, write_receipts
+    from .paper_content import corpus_content, paced_conclusions, read_sections_cache, sections_cache_dir
     from .profile import build_profile
     from .rerank import state_dir
 
@@ -234,27 +256,27 @@ def calibrate_arms(cfg: Config, fold: FoldResult, client, fetch_metadata, runs: 
         report.metrics["replay_arms"] = {"n": 0}
         return report
     meta = fetch_metadata(sorted(labeled))
-    profile = build_profile(fold, cfg, _today(), content=_corpus_content_or_none(cfg))
-    arms = [
-        ("fixed-15/4KB", StatePolicy()),
-        ("greedy/4KB", StatePolicy(policy="budget-greedy", taste_budget=2500)),
-        ("greedy/8KB", StatePolicy(policy="budget-greedy", taste_budget=8000)),
-        ("fixed-15/4KB+content", StatePolicy(candidate_conclusions=True)),
-        ("greedy/4KB+content", StatePolicy(policy="budget-greedy", taste_budget=2500, candidate_conclusions=True)),
-        ("greedy/8KB+content", StatePolicy(policy="budget-greedy", taste_budget=8000, candidate_conclusions=True)),
-    ]
+    profile = build_profile(fold, cfg, _today(), content=corpus_content(cfg))
+    arms = state_arms()
+    # conclusions are arm-independent: warm the shared cache ONCE, paced — never a
+    # burst per arm
+    if any(policy.candidate_conclusions for _, policy in arms):
+        paced_conclusions(sorted(labeled), sections_cache_dir(), pace_s=cfg.candidate_pace_s)
     arm_receipts: list = []
     run_id = f"arms-{_today().isoformat()}"
     for name, policy in arms:
         pairs: list[tuple[float, int]] = []
+        state_bytes: list[int] = []
         for arxiv, outcome in labeled.items():
             m = meta.get(arxiv) or {}
             item = _JournalCandidate(title=journal_titles.get(arxiv) or m.get("title") or "",
                                      authors=[], abstract=m.get("abstract") or "", arxiv=arxiv)
-            conclusions = (candidate_conclusions(arxiv) if policy.candidate_conclusions else None)
+            conclusions = (read_sections_cache(arxiv).get("conclusions")
+                           if policy.candidate_conclusions else None)
             assembly = assemble_state(profile, item, policy, conclusions)
             if assembly.state is None:
                 continue
+            state_bytes.append(assembly.state_bytes)
             answer = client.score_relevance(assembly.state, arxiv, run_id, arm_receipts)
             if not answer.ok:
                 continue
@@ -262,9 +284,8 @@ def calibrate_arms(cfg: Config, fold: FoldResult, client, fetch_metadata, runs: 
         report.metrics[f"arm_{name}"] = {
             "brier": round(sum((p - o) ** 2 for p, o in pairs) / len(pairs), 4) if pairs else None,
             "n": len(pairs),
+            "mean_state_bytes": round(sum(state_bytes) / len(state_bytes)) if state_bytes else None,
         }
-    from .jev import write_receipts
-
     if arm_receipts:
         write_receipts(state_dir() / "arms", arm_receipts)
     report.notes.append(
@@ -283,12 +304,6 @@ class _JournalCandidate:
         from types import SimpleNamespace
 
         self.item = SimpleNamespace(title=title, authors=authors, abstract=abstract, arxiv=arxiv)
-
-
-def _corpus_content_or_none(cfg: Config) -> dict[str, dict] | None:
-    from .paper_content import corpus_content
-
-    return corpus_content(cfg)
 
 
 def _latest_receipts(receipts: list[dict]) -> list[dict]:

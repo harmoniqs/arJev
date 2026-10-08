@@ -135,6 +135,34 @@ def test_candidate_conclusions_failure_caches_nothing_and_returns_none(monkeypat
     assert read_sections_cache("2601.01013", cache_dir) == {}, "a transient failure retries tomorrow"
 
 
+def test_candidate_conclusions_transport_error_fails_open_not_fatal(monkeypatch, tmp_path):
+    """Review regression (Critical 1): a dead proxy mid-digest must fail open to
+    None — never raise into run_digest and kill the digest."""
+    isolate_state(monkeypatch, tmp_path)
+
+    def dead_fetcher(url):
+        raise ConnectionError("simulated dead proxy")
+
+    assert candidate_conclusions("2601.01014", sections_cache_dir(), fetcher=dead_fetcher) is None
+    assert read_sections_cache("2601.01014") == {}
+
+
+def test_paced_conclusions_sleeps_only_after_real_fetch_attempts(monkeypatch, tmp_path):
+    """The politeness seam: cache hits are free; sleeps come only after real fetch
+    attempts, and never after the last id."""
+    from arjev.paper_content import paced_conclusions
+
+    isolate_state(monkeypatch, tmp_path)
+    _fake_pdf(monkeypatch, "Conclusions\n\nA long enough conclusions body that clears the length floor.\n")
+    sleeps = []
+    cache_dir = sections_cache_dir()
+    write_sections_cache("2601.01021", {"conclusions": "cached"}, cache_dir)
+    out = paced_conclusions(["2601.01021", "2601.01022", "2601.01023"], cache_dir, pace_s=3.0,
+                            sleep=sleeps.append, fetcher=lambda url: b"pdf")
+    assert out == {"2601.01021": "cached", "2601.01022": out["2601.01022"], "2601.01023": out["2601.01023"]}
+    assert sleeps == [3.0], "one sleep: between the two real fetches, none for the cache hit or after the last"
+
+
 # ── fetch + backfill: the explicit network paths ─────────────────────────────────
 
 
@@ -146,6 +174,21 @@ def test_fetch_pdf_emits_library_text(monkeypatch, tmp_path):
     path = fetch_pdf("2307.06617", library, fetcher=lambda url: b"pdf-bytes")
     assert path.name == "arxiv-2307.06617.pdf"
     assert (library / "arxiv-2307.06617.txt").read_text() == _PAPER_TEXT
+
+
+def test_fetch_pdf_exists_path_pays_extraction_once(monkeypatch, tmp_path):
+    """Review regression: a pre-feature PDF (exists, no .txt) must gain its text on
+    the exists-path — otherwise backfill never converges and counts false fetches."""
+    from arjev.keep import fetch_pdf
+
+    monkeypatch.setattr("arjev.paper_content.pdf_text", lambda data: _PAPER_TEXT)
+    library = tmp_path / "library"
+    library.mkdir()
+    (library / "arxiv-2307.06620.pdf").write_bytes(b"pre-feature pdf")
+    calls = []
+    fetch_pdf("2307.06620", library, fetcher=lambda url: calls.append(url) or b"never")
+    assert calls == [], "the exists-path never re-fetches"
+    assert (library / "arxiv-2307.06620.txt").read_text() == _PAPER_TEXT
 
 
 def test_fetch_pdf_extraction_failure_still_delivers_the_pdf(monkeypatch, tmp_path):
