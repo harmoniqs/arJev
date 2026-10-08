@@ -150,8 +150,8 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_config(Path(args.config).expanduser() if args.config else None)
         result = backfill_corpus(cfg, pace_s=args.pace_s)
         print(
-            f"corpus: {result['n_corpus']} notes · fetched {len(result['fetched'])} · "
-            f"api-abstract-only {len(result['api_only'])} · failed {len(result['failed'])}"
+            f"corpus: {result['n_corpus']} notes · abstracts stamped {result['abstracts_stamped']} · "
+            f"text fetched {len(result['fetched'])} · failed {len(result['failed'])}"
         )
         if result["failed"]:
             print(f"failed: {', '.join(result['failed'][:10])}")
