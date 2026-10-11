@@ -49,9 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     p_staged = sub.add_parser("staged", help="the prose worklist: kept notes awaiting a body (read-only)")
     p_staged.add_argument("--config", default=None)
 
-    p_inspect = sub.add_parser(
-        "inspect", help="verify the config: checklist state + the fold's view (read-only)"
-    )
+    p_inspect = sub.add_parser("inspect", help="verify the config: checklist state + the fold's view (read-only)")
     p_inspect.add_argument("--config", default=None)
 
     p_labels = sub.add_parser("labels", help="label ledger operations")
@@ -71,8 +69,11 @@ def main(argv: list[str] | None = None) -> int:
     p_ingest.add_argument("--slack-channel-id", default=None, help="channel id (when the name is not in the config)")
     p_ingest.add_argument("--limit", type=int, default=200, help="Slack history window")
     p_ingest.add_argument("--papers-dir", default=None, help="where seeded notes land (default: config papers dir)")
-    p_ingest.add_argument("--backfill-titles", action="store_true",
-                          help="fetch real titles for placeholder-titled seed notes (explicit human-invoked repair)")
+    p_ingest.add_argument(
+        "--backfill-titles",
+        action="store_true",
+        help="fetch real titles for placeholder-titled seed notes (explicit human-invoked repair)",
+    )
     p_ingest.add_argument("--config", default=None)
 
     p_rate = sub.add_parser("rate", help="advisory ratings: Jev proposes, you accept")
@@ -87,9 +88,19 @@ def main(argv: list[str] | None = None) -> int:
     p_cal = sub.add_parser("calibrate", help="replay joins → Brier, reliability, precision@5, probe lift")
     p_cal.add_argument("--config", default=None)
     p_cal.add_argument("--runs", type=int, default=30, help="journal window (last N runs)")
-    p_cal.add_argument("--replay-arms", action="store_true",
-                       help="A/B the state arms live (Jev calls + candidate fetches; labeled candidates only)")
+    p_cal.add_argument(
+        "--replay-arms",
+        action="store_true",
+        help="A/B the state arms live (Jev calls + candidate fetches; labeled candidates only)",
+    )
     p_cal.add_argument("--json", action="store_true", help="machine-readable report")
+
+    p_review = sub.add_parser(
+        "review", help="the week-in-review: the buried, your people, the divergences, the receipts (read-only)"
+    )
+    p_review.add_argument("--days", type=int, default=7, help="window in days (default: 7)")
+    p_review.add_argument("--post", default="stdout", choices=["stdout", "slack"], help="output sink")
+    p_review.add_argument("--config", default=None)
 
     args = parser.parse_args(argv)
     if args.cmd == "init":
@@ -223,8 +234,14 @@ def main(argv: list[str] | None = None) -> int:
             channel_id = args.slack_channel_id or _resolve_channel(cfg, args.slack_channel)
             users = _slack_users()
             hits = ingest_slack_channel(
-                SlackClient(token=slack_token()), channel_id, name, users,
-                cfg, today, papers_dir, limit=args.limit,
+                SlackClient(token=slack_token()),
+                channel_id,
+                name,
+                users,
+                cfg,
+                today,
+                papers_dir,
+                limit=args.limit,
             )
             print(f"slack: {len(hits)} human-shared papers seeded from #{name}")
             total += len(hits)
@@ -289,6 +306,20 @@ def main(argv: list[str] | None = None) -> int:
 
         print(json.dumps(dataclasses.asdict(report), indent=2, sort_keys=True) if args.json else report.render())
         return 0
+    if args.cmd == "review":
+        from arjev.config import load_config
+        from arjev.review import post_review, review
+
+        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        try:
+            report = review(days=args.days)
+        except (FileNotFoundError, ValueError) as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        print(report.render())
+        if args.post == "slack":
+            post_review(cfg, report)
+        return 0
     if args.cmd == "slack" and args.slack_cmd == "sync":
         from datetime import date
 
@@ -306,12 +337,18 @@ def main(argv: list[str] | None = None) -> int:
         journal = [json.loads(line) for line in journal_path().read_text().splitlines() if line.strip()]
         posted = [
             {"arxiv": c["arxiv"], "slack_ts": c["slack_ts"]}
-            for line in journal if line.get("slack_channel") == cfg.slack_channel
-            for c in line.get("candidates", []) if c.get("slack_ts")
+            for line in journal
+            if line.get("slack_channel") == cfg.slack_channel
+            for c in line.get("candidates", [])
+            if c.get("slack_ts")
         ]
         labels, _, _ = harvest_labels(
-            SlackClient(token=slack_token()), cfg.slack_channel, posted,
-            set(cfg.slack_keepers), cfg.emoji_map, now_ts(),
+            SlackClient(token=slack_token()),
+            cfg.slack_channel,
+            posted,
+            set(cfg.slack_keepers),
+            cfg.emoji_map,
+            now_ts(),
         )
         ledger = LabelLedger()
         written = [label for label in labels if ledger.append(label)]

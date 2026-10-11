@@ -281,6 +281,10 @@ this pass with the daily run.
 - Fill `rating:` and `why:` on notes — that's what makes notes taste.
 - `arjev calibrate` (weekly; add it to the timer on Sundays) — read the report;
   thresholds are human-applied, by design.
+- `arjev review --days 7` (Sundays, after the digest) — the across-days view:
+  the buried, the roster matches, the divergences, the week's receipts. Read-only,
+  deterministic, n-stated; posts with `arjev review --days 7 --post slack` if the
+  channel is configured.
 - Rate-proposals: `arjev rate propose` asks the model for advisory first-pass
   ratings (side table only, vault untouched); `arjev rate accept <arxiv>
   <core|useful|marginal>` is the human gate that writes the rating.

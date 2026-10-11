@@ -122,6 +122,10 @@ arJev's core is deliberately **text-free** — deterministic rendering, and the 
 
 `arjev calibrate --replay-arms` goes one further: it re-assembles each labeled candidate's context under every state arm — the incumbent fixed budget, the budget-greedy policy at 4/8/12 KB, each with and without candidate conclusions — re-scores them live (conclusions fetched once, paced, from the shared cache), and reports Brier, n, and the realized state size per arm. That report is the only road to changing a default in this tool.
 
+## The week-in-review
+
+The daily digest is capped at top-5 and sees one day of the firehose. `arjev review --days 7` is the across-days view: a pure re-read of the journal the digests already wrote — no fetches, no model calls, deterministic — in four sections. **The Buried**: the week's never-posted candidates re-ranked by Jev confidence (the cap's casualties). **Your People**: the author-lane matches, posted or not. **The Divergences**: the two tails where Jev and the words disagreed. **The Week's Receipts**: kept vs. skipped with the calibration headline, every n stated. Read-only — the review proposes, never stages; `arjev review --post slack` sends it to the channel the digest posts to.
+
 One network disclosure: corpus content resolves from local files only. The candidate-content arm is the one fetch a digest can make — bounded to the finalists, paced at 3 s, cached in the state dir, and fail-open: a dead network degrades that arm to abstract-only and the digest still ships, with the `mode:` line saying what ran.
 
 ## Status
