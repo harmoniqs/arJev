@@ -5,8 +5,7 @@
 <item>
   <title>Synthetic: $\sqrt{\text{X}}$-gate calibration with randomized compiling</title>
   <link>http://arxiv.org/abs/2601.01011v2</link>
-  <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">A. Synthetic</dc:creator>
-  <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">B. Example</dc:creator>
+  <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">A. Synthetic, B. Example</dc:creator>
   <description>&lt;p&gt;Synthetic abstract about randomized compiling and detection-rate surrogates for surface-code calibration.&lt;/p&gt;</description>
 </item>
 <item>

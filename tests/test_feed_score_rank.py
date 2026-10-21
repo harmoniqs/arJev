@@ -25,6 +25,23 @@ def test_parse_fixture_rss():
     assert all(not i.arxiv.endswith("v1") for i in items)
 
 
+def test_creator_blob_splits_to_individual_names():
+    # arXiv RSS emits ONE creator element with the whole comma-joined author
+    # list — names are split at parse, or the author lane and the who-line
+    # both see a single blob (found live 2026-10-21: a tracked Schuster
+    # co-author rendered with no star and no roster hit)
+    from arjev.feed import _split_names
+
+    assert _split_names("Chunyang Ding, Chuyao Tong, David I. Schuster") == \
+        ["Chunyang Ding", "Chuyao Tong", "David I. Schuster"]
+    assert _split_names("A. Synthetic and B. Example") == ["A. Synthetic", "B. Example"]
+    assert _split_names("A, B, and C") == ["A", "B", "C"]
+    assert _split_names("Lone Author") == ["Lone Author"]
+    assert _split_names("") == []
+    items = parse_arxiv_rss(RSS.read_text())
+    assert items[0].authors == ["A. Synthetic", "B. Example"]
+
+
 def test_malformed_feed_degrades_to_empty():
     assert parse_arxiv_rss("<rss><channel><title>broken") == []
     assert parse_arxiv_rss("") == []
