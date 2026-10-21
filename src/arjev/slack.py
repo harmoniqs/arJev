@@ -79,12 +79,38 @@ class SlackPost:
     arxiv: str
 
 
-def render_pick_message(pick, index: int, total: int, today, mode: str, why_style: str) -> SlackPost:
+def render_who_line(who) -> str:
+    """Authors (first three + '+N', tracked hits always pulled in) — hits —
+    affiliations, per the mockup ratified in issue #87. The group on a hit is
+    the curated roster label, never a parse."""
+    groups = dict(who.hits)
+    shown = [
+        f"⭐ {a} ({groups[a]})" if a in groups and groups[a]
+        else f"⭐ {a}" if a in groups
+        else a
+        for a in who.authors[:3]
+    ]
+    text = ", ".join(shown)
+    if len(who.authors) > 3:
+        text += f" +{len(who.authors) - 3}"
+    extra = [f"⭐ {n} ({g})" if g else f"⭐ {n}" for n, g in who.hits if n not in who.authors[:3]]
+    if extra:
+        text += " — " + ", ".join(extra)
+    if who.affiliations:
+        text += " · " + ", ".join(who.affiliations)
+        if who.more_affiliations:
+            text += f" +{who.more_affiliations}"
+    return text
+
+
+def render_pick_message(pick, index: int, total: int, today, mode: str, why_style: str, who=None) -> SlackPost:
     title = latex_to_unicode(pick.title)
     # the digest header names the feeds; pick headers stay link-free (Slack
     # linkifies raw "quant-ph+cond-mat..." strings into fake URLs)
     lines = [f"*arJev pick {index}/{total} for {today.isoformat()}* — {mode}",
              f"<http://arxiv.org/abs/{pick.arxiv}|{title}>"]
+    if who is not None:
+        lines.append(f"   _who:_ {render_who_line(who)}")
     if why_style == "terms":
         shown = ", ".join(f"`{t}`" for t in pick.terms[:5])
         why = f"{shown} (score {pick.lexical_score})" if shown else "(no terms)"

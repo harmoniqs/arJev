@@ -95,3 +95,53 @@ def test_accents_never_break_matching():
 def test_zero_roster_is_inert():
     assert parse_directives("---\ntype: directives\n---\nbody").authors == []
     assert parse_directives("no frontmatter at all").authors == []
+
+
+def test_group_suffix_matches_as_if_bare(tmp_path):
+    # issue #87: "Name — Group" roster entries — the matching rule ignores the
+    # suffix, scoring is unchanged, and the group rides separately for the who-line
+    from arjev.directives import split_group
+
+    assert split_group("D. I. Schuster — Stanford") == ("D. I. Schuster", "Stanford")
+    assert split_group("D. I. Schuster") == ("D. I. Schuster", None)
+    assert _name_match("D. I. Schuster — Stanford", ["D. I. Schuster"])
+    assert not _name_match("D. I. Schuster — Stanford", ["T. Schuster"])
+
+    suffixed = _cfg_with_directives(tmp_path, """---
+type: directives
+authors: ["D. I. Schuster — Stanford"]
+---
+body
+""")
+    from arjev.directives import load_directives
+    profile = build_profile(fold_roots([tmp_path], suffixed), suffixed, TODAY, directives=load_directives(suffixed))
+    scored = score_item(FeedItem(arxiv="4.1", title="A superconducting circuit paper", abstract=ABSTRACT,
+                                  authors=["D. I. Schuster", "A. Collaborator"]), profile)
+    assert "d. i. schuster" in scored.terms  # the why-line term stays the bare name
+    assert "stanford" not in scored.terms      # the group never leaks into scoring terms
+    assert load_directives(suffixed).author_groups() == {"D. I. Schuster": "Stanford"}
+
+
+def test_group_suffix_leaves_scoring_bit_identical(tmp_path):
+    # the machine gate author_lane_score_delta_with_group_suffix == 0
+    def _score(cfg):
+        from arjev.directives import load_directives
+        profile = build_profile(fold_roots([tmp_path], cfg), cfg, TODAY, directives=load_directives(cfg))
+        return score_item(FeedItem(arxiv="5.1", title="A superconducting circuit paper", abstract=ABSTRACT,
+                                   authors=["D. I. Schuster", "A. Collaborator"]), profile).score
+
+    bare = _cfg_with_directives(tmp_path, """---
+type: directives
+authors: ["D. I. Schuster"]
+---
+body
+""")
+    bare_score = _score(bare)
+    assert bare_score > 0.0
+    (tmp_path / "arjev-directives.md").write_text("""---
+type: directives
+authors: ["D. I. Schuster — Stanford"]
+---
+body
+""")
+    assert _score(bare) == bare_score  # the suffixed roster scores bit-identically

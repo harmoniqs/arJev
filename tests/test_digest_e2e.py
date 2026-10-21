@@ -89,6 +89,39 @@ def test_init_smoke_vault_sink_writes_digest_note(tmp_path, monkeypatch):
     assert note.read_text() == content
 
 
+def test_vault_sink_carries_the_who_line(tmp_path, monkeypatch):
+    # issue #87: the durable digest note gets the same attribution block — the
+    # writing seam reads who wrote the paper, not just why it was picked
+    from conftest import _pdf_bytes
+
+    isolate_state(monkeypatch, tmp_path)
+    cfg = digest_cfg()
+    cfg.roots = [str(tmp_path / "vault")]
+    (tmp_path / "vault").mkdir()
+    (tmp_path / "vault" / "papers").mkdir()
+    (tmp_path / "vault" / "arjev-directives.md").write_text(
+        "---\ntype: directives\nauthors: [\"A. Synthetic — Stanford-Schuster\"]\n---\nbody\n")
+    cfg.digest_dir = str(tmp_path / "digests")
+    cfg.who_style = "full"
+    cfg.library_dir = str(tmp_path / "library")
+
+    def pdf_fetcher(url):
+        return _pdf_bytes([
+            "Synthetic: X-gate calibration with randomized compiling",
+            "A. Synthetic, B. Example",
+            "1 Department of Physics, Stanford University, Stanford, CA 94305, USA",
+            "Abstract",
+            "We calibrate gates.",
+        ])
+
+    run_digest(cfg, feed_file=str(RSS), post="vault", today=TODAY, seed="s", pdf_fetcher=pdf_fetcher)
+    content = (tmp_path / "digests" / "2026-10-01.md").read_text()
+    assert "⭐ A. Synthetic (Stanford-Schuster)" in content
+    assert "Stanford University, Stanford" in content
+    # the checkbox label source still parses: line keeps its `- [ ]` prefix and link
+    assert "- [ ]" in content and "[arXiv:2601.01011]" in content
+
+
 def test_corpus_papers_never_picked(monkeypatch, tmp_path):
     isolate_state(monkeypatch, tmp_path)
     result = run_digest(digest_cfg(), feed_file=str(RSS), today=TODAY, seed="s")

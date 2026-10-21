@@ -130,8 +130,10 @@ def build_profile(fold: FoldResult, cfg, now: date, directives=None, content: di
                 profile.terms[t] = profile.terms.get(t, 0.0) + DIRECTIVE_WEIGHT
         # tracked people: a SEPARATE namespace — "Schuster" must never fire on an
         # abstract that merely mentions a Schuster; these match only the authors field
+        from .directives import split_group
+
         for term in directives.authors:
-            t = term.lower().strip()
+            t = split_group(term)[0].lower().strip()
             if t:
                 profile.author_terms[t] = profile.author_terms.get(t, 0.0) + DIRECTIVE_WEIGHT
     contributing = [p for p in fold.papers if p.contributes_taste]

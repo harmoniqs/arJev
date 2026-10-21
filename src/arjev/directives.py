@@ -28,6 +28,20 @@ class Directives:
     def all_terms(self) -> list[str]:
         return self.labs + self.companies + self.topics
 
+    def author_groups(self) -> dict[str, str]:
+        """name → group for entries carrying the ' — Group' suffix (issue #87);
+        bare entries and groups ride only where curation wrote them."""
+        return {name: group for name, group in (split_group(e) for e in self.authors) if group}
+
+
+def split_group(entry: str) -> tuple[str, str | None]:
+    """Roster entries may carry a 'Name — Group' suffix. The group is
+    display-only — matching and scoring always see the bare name."""
+    if " — " in entry:
+        name, group = entry.split(" — ", 1)
+        return name.strip(), group.strip() or None
+    return entry.strip(), None
+
 
 def load_directives(cfg) -> Directives:
     """The directives note: explicit path, else arjev-directives.md at the first

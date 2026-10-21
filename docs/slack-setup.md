@@ -21,6 +21,7 @@ a `👍` on a pick message is a *keep* for that paper. Five minutes of setup, on
 channel = "#papers"                  # the digest channel
 keepers = ["U0YOURID", "U0TEAMMATE"] # Slack user ids whose reactions count as labels
 why_style = "terms"                  # terms | opaque | none — what the why-line reveals
+who_style = "authors"                # full | authors | none — the who-line under each pick
 emoji_map = { thumbsup = "keep", eyes = "read-later", x = "skip" }
 
 [slack.emoji_map]  # long form, equivalent
@@ -32,6 +33,12 @@ thumbsup = "keep"
   via the Slack API `users.list`.
 - **why_style** controls what the why-line shows: `terms` (matched taste terms — your
   own channel, fine), `opaque` (just "profile match"), or `none` (just the score).
+- **who_style** controls the who-line — authors, affiliations, tracked-people hits:
+  `full` (authors plus affiliations parsed from each pick's own PDF — one paced fetch
+  per pick, library-cached, fail-open per ADR 0002), `authors` (authors + tracked
+  hits, no PDF fetch — the default), or `none`. Roster entries may carry a group:
+  `authors: ["M. Lukin — Harvard-Lukin"]`; the group is display-only and matching
+  ignores it.
 
 ## 3. Environment
 

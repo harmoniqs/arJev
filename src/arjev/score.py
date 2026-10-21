@@ -38,8 +38,11 @@ def _fold_name(text: str) -> str:
 def _name_match(roster_entry: str, authors: list[str]) -> bool:
     """Surname token + first-initial agreement. A surname-only roster entry
     matches any first name (a deliberate whole-family follow); a mismatched
-    initial never matches. Case-insensitive + accent-folded throughout (issue #66)."""
-    entry = _fold_name(roster_entry.lower()).replace(".", " ").split()
+    initial never matches. Case-insensitive + accent-folded throughout (issue #66).
+    A ' — Group' suffix is ignored — the group is display-only (issue #87)."""
+    from .directives import split_group
+
+    entry = _fold_name(split_group(roster_entry)[0].lower()).replace(".", " ").split()
     surname = entry[-1] if entry else ""
     if not surname:
         return False

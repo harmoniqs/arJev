@@ -9,7 +9,7 @@ from arjev.cli import main
 from arjev.digest import run_digest
 from arjev.latex import latex_to_unicode
 from arjev.slack import DEFAULT_EMOJI_MAP, SlackClient, harvest_labels, render_pick_message
-from conftest import RSS, TODAY, VAULT, digest_cfg, isolate_state
+from conftest import RSS, TODAY, VAULT, _pdf_bytes, digest_cfg, isolate_state
 
 FIXTURES = Path(__file__).parent / "fixtures"
 KEEPERS = {"U0000000SYN"}
@@ -129,7 +129,146 @@ def test_probe_rescue_why_line_in_slack():
     assert "rescued by probe" in msg.text and f"p={pick.jev_primary:.2f}" in msg.text
 
 
+def test_who_line_full_format():
+    # issue #87: authors first-three + "+N", tracked hits always pulled in with
+    # their curated group, affiliations capped — the mockup ratified in the issue
+    from arjev.affil import WhoInfo
+
+    who = WhoInfo(
+        authors=["Samuel A. Engel", "Dewei Gong", "Ziguang Lin", "Lysander Christakis",
+                 "Kang-Kuen Ni", "Norman Y. Yao"],
+        hits=[("Kang-Kuen Ni", "Harvard"), ("Norman Y. Yao", None)],
+        affiliations=["Massachusetts Institute of Technology", "UC Berkeley"],
+        more_affiliations=1,
+    )
+    msg = render_pick_message(_Pick(), 2, 5, TODAY, "mode: jev, ok", "terms", who=who)
+    line = next(ln for ln in msg.text.split("\n") if ln.strip().startswith("_who:_"))
+    assert "Samuel A. Engel, Dewei Gong, Ziguang Lin +3" in line
+    assert "⭐ Kang-Kuen Ni (Harvard)" in line  # beyond-first-3 hit pulled in, group shown
+    assert "⭐ Norman Y. Yao" in line  # bare roster entry: no group parens
+    assert "Massachusetts Institute of Technology, UC Berkeley +1" in line
+    assert line.index("+3") < line.index("Kang-Kuen Ni")  # authors, then hits, then affiliations
+
+
+def test_who_line_inline_hit_and_absent_affiliations():
+    from arjev.affil import WhoInfo
+
+    who = WhoInfo(authors=["Dave Schuster", "A. Collaborator"],
+                  hits=[("Dave Schuster", "Stanford-Schuster")])
+    msg = render_pick_message(_Pick(), 1, 5, TODAY, "mode: jev, ok", "terms", who=who)
+    line = next(ln for ln in msg.text.split("\n") if ln.strip().startswith("_who:_"))
+    assert "⭐ Dave Schuster (Stanford-Schuster), A. Collaborator" in line  # hit inside first-3: inline
+    assert "·" not in line  # no affiliations: no separator, no dangling punctuation
+
+
+def test_who_line_absent_who_renders_no_line():
+    msg = render_pick_message(_Pick(), 1, 5, TODAY, "mode: jev, ok", "terms")
+    assert "_who:_" not in msg.text
+
+
 # ── rate discipline ──────────────────────────────────────────────────────────────
+
+# ── the who-line (issue #87) ──────────────────────────────────────────────────────
+
+def test_who_line_authors_mode_never_fetches_a_pdf(monkeypatch, tmp_path):
+    # the machine gate: pdf_fetches_per_digest_under_authors_mode == 0
+    isolate_state(monkeypatch, tmp_path)
+    fake = FakeSlack()
+    cfg = digest_cfg()
+    cfg.slack_channel = "C0000000SYN"
+    cfg.papers_dir = str(tmp_path / "papers")
+    cfg.roots = [str(VAULT)]
+    cfg.who_style = "authors"
+    calls = []
+
+    def counting_fetcher(url):
+        calls.append(url)
+        return b"%PDF-fake"
+
+    run_digest(cfg, feed_file=str(RSS), today=TODAY, seed="s", post="slack",
+               slack_client=fake.client(), pdf_fetcher=counting_fetcher)
+    assert calls == []
+    texts = [p["text"] for _, p in fake.calls]
+    assert any("_who:_" in t for t in texts[1:])  # the author part still rides
+
+
+def test_who_line_none_style_renders_no_line(monkeypatch, tmp_path):
+    isolate_state(monkeypatch, tmp_path)
+    fake = FakeSlack()
+    cfg = digest_cfg()
+    cfg.slack_channel = "C0000000SYN"
+    cfg.papers_dir = str(tmp_path / "papers")
+    cfg.roots = [str(VAULT)]
+    cfg.who_style = "none"
+
+    def canary_fetcher(url):  # "none" is one step more inert than "authors"
+        raise AssertionError("who_style=none must not fetch a PDF")
+
+    run_digest(cfg, feed_file=str(RSS), today=TODAY, seed="s", post="slack",
+               slack_client=fake.client(), pdf_fetcher=canary_fetcher)
+    texts = [p["text"] for _, p in fake.calls]
+    assert all("_who:_" not in t for t in texts[1:])
+    assert "roster hits" not in texts[0]
+
+
+def test_who_line_full_mode_fetches_and_renders(monkeypatch, tmp_path):
+    isolate_state(monkeypatch, tmp_path)
+    fake = FakeSlack()
+    cfg = digest_cfg()
+    cfg.slack_channel = "C0000000SYN"
+    cfg.papers_dir = str(tmp_path / "papers")
+    cfg.roots = [str(tmp_path / "vault")]
+    (tmp_path / "vault").mkdir()
+    (tmp_path / "vault" / "papers").mkdir()
+    (tmp_path / "vault" / "arjev-directives.md").write_text(
+        "---\ntype: directives\nauthors: [\"A. Synthetic — Stanford-Schuster\"]\n---\nbody\n")
+    cfg.who_style = "full"
+    cfg.library_dir = str(tmp_path / "library")
+
+    def pdf_fetcher(url):
+        return _pdf_bytes([
+            "Synthetic: X-gate calibration with randomized compiling",
+            "A. Synthetic, B. Example",
+            "1 Department of Physics, Stanford University, Stanford, CA 94305, USA",
+            "Abstract",
+            "We calibrate gates.",
+        ])
+
+    run_digest(cfg, feed_file=str(RSS), today=TODAY, seed="s", post="slack",
+               slack_client=fake.client(), pdf_fetcher=pdf_fetcher)
+    texts = [p["text"] for _, p in fake.calls]
+    pick = next(t for t in texts if "2601.01011" in t and "_who:_" in t)
+    assert "⭐ A. Synthetic (Stanford-Schuster), B. Example · Stanford University, Stanford" in pick
+    assert "1 Department" not in pick  # the printed line is trimmed, not shown raw
+
+
+def test_who_line_full_mode_degrades_open_on_fetch_failure(monkeypatch, tmp_path, capsys):
+    # the machine gate: who_line_failures_blocking_post == 0 — a broken PDF
+    # renders authors + hits with no affiliations, and the post still lands
+    isolate_state(monkeypatch, tmp_path)
+    fake = FakeSlack()
+    cfg = digest_cfg()
+    cfg.slack_channel = "C0000000SYN"
+    cfg.papers_dir = str(tmp_path / "papers")
+    cfg.roots = [str(tmp_path / "vault")]
+    (tmp_path / "vault").mkdir()
+    (tmp_path / "vault" / "papers").mkdir()
+    (tmp_path / "vault" / "arjev-directives.md").write_text(
+        "---\ntype: directives\nauthors: [\"A. Synthetic — Stanford-Schuster\"]\n---\nbody\n")
+    cfg.who_style = "full"
+    cfg.library_dir = str(tmp_path / "library")
+
+    def broken_fetcher(url):
+        return b"not a pdf at all"
+
+    run_digest(cfg, feed_file=str(RSS), today=TODAY, seed="s", post="slack",
+               slack_client=fake.client(), pdf_fetcher=broken_fetcher)
+    texts = [p["text"] for _, p in fake.calls]
+    assert any("_who:_" in t for t in texts[1:])
+    assert all("University" not in t for t in texts[1:])  # no guessed affiliation
+    assert "roster hits" in texts[0]  # the header count rides even degraded
+    err = capsys.readouterr().err
+    assert "who-line" in err and "2601" in err  # the degradation is logged, never surfaced in Slack
 
 def test_rate_limit_never_faster_than_one_per_second():
     fake = FakeSlack()

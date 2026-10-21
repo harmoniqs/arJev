@@ -54,9 +54,13 @@ def render_mrkdwn(picks: list[Pick], feed_name: str, total: int, today: date, mo
 
 
 def render_vault_note(picks: list[Pick], feed_name: str, total: int, today: date, mode: str,
-                      skipped_corpus: int) -> str:
+                      skipped_corpus: int, who_by_id: dict | None = None) -> str:
     """The digests/ note: checkboxes are decision records — slice 3's labels sync parses
-    exactly this format (source: `checkbox`)."""
+    exactly this format (source: `checkbox`). The who-attribution (issue #87) rides the
+    same line after the why — the checkbox parser keys on the `- [x]` prefix and the
+    arXiv link, both untouched."""
+    from .slack import render_who_line
+
     fm = (
         "---\n"
         f"type: digest\n"
@@ -69,6 +73,9 @@ def render_vault_note(picks: list[Pick], feed_name: str, total: int, today: date
     for p in picks:
         target = f"[arXiv:{p.arxiv}](https://arxiv.org/abs/{p.arxiv})"
         lines.append(f"- [ ] {p.title} — {target} · {_why_terms(p)}")
+        who = (who_by_id or {}).get(p.arxiv)
+        if who is not None:
+            lines.append(f"    - who: {render_who_line(who)}")
     if not picks:
         lines.append("- nothing matched the lab profile today")
     lines.append("")
