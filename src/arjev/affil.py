@@ -38,7 +38,7 @@ _ADDRESS_TAIL = re.compile(
 )
 _TRAILING_AND = re.compile(r"[;,]?\s*\b(and|&)\s*$", re.IGNORECASE)
 _ABSTRACT = re.compile(r"^\s*abstract\b", re.IGNORECASE)
-_MARKER = re.compile(r"^\s*[\d\u00b9\u00b2\u00b3\u2070-\u209f*\u2020\u2021\u00a7]+\s*[.,]?\s*")
+_MARKER = re.compile(r"^[\s\d\u00b9\u00b2\u00b3\u2070-\u209f*\u2020\u2021\u00a7()\[\]]+[.,]?\s*")
 _DIGIT = re.compile(r"\d")
 
 

@@ -62,6 +62,16 @@ class FeedItem:
 def _strip_tags(s: str) -> str:
     return re.sub(r"<[^>]*>", " ", unescape(s)).strip()
 
+_AND = re.compile(r",\s*|\s+and\s+")
+_LEADING_AND = re.compile(r"^and\s+")
+
+
+def _split_names(blob: str) -> list[str]:
+    """arXiv RSS emits ONE creator element carrying the whole comma-joined
+    author list — names are split at parse (the normalize-at-parse doctrine).
+    A lone trailing 'and' form splits too; a blob of one name stays one."""
+    return [n for n in (_LEADING_AND.sub("", p).strip() for p in _AND.split(blob)) if n]
+
 
 def _text_of(el) -> str:
     return el.text or ""
@@ -84,9 +94,10 @@ def parse_arxiv_rss(xml: str) -> list[FeedItem]:
         if title_el is None or link_el is None or _text_of(title_el) is None:
             continue
         authors = [
-            _strip_tags(t.text)
+            n
             for t in item.iter()
             if t.tag.endswith("creator") or t.tag.endswith("author")
+            for n in _split_names(_strip_tags(t.text))
         ]
         m = _ABSPATH.search(_text_of(link_el).strip())
         if not m:
