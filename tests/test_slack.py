@@ -129,6 +129,41 @@ def test_probe_rescue_why_line_in_slack():
     assert "rescued by probe" in msg.text and f"p={pick.jev_primary:.2f}" in msg.text
 
 
+def test_who_line_full_format():
+    # issue #87: authors first-three + "+N", tracked hits always pulled in with
+    # their curated group, affiliations capped — the mockup ratified in the issue
+    from arjev.affil import WhoInfo
+
+    who = WhoInfo(
+        authors=["Samuel A. Engel", "Dewei Gong", "Ziguang Lin", "Lysander Christakis", "Kang-Kuen Ni", "Norman Y. Yao"],
+        hits=[("Kang-Kuen Ni", "Harvard"), ("Norman Y. Yao", None)],
+        affiliations=["Massachusetts Institute of Technology", "UC Berkeley"],
+        more_affiliations=1,
+    )
+    msg = render_pick_message(_Pick(), 2, 5, TODAY, "mode: jev, ok", "terms", who=who)
+    line = next(l for l in msg.text.split("\n") if l.strip().startswith("_who:_"))
+    assert "Samuel A. Engel, Dewei Gong, Ziguang Lin +3" in line
+    assert "⭐ Kang-Kuen Ni (Harvard)" in line  # beyond-first-3 hit pulled in, group shown
+    assert "⭐ Norman Y. Yao" in line  # bare roster entry: no group parens
+    assert "Massachusetts Institute of Technology, UC Berkeley +1" in line
+    assert line.index("+3") < line.index("Kang-Kuen Ni")  # authors, then hits, then affiliations
+
+
+def test_who_line_inline_hit_and_absent_affiliations():
+    from arjev.affil import WhoInfo
+
+    who = WhoInfo(authors=["Dave Schuster", "A. Collaborator"], hits=[("Dave Schuster", "Stanford-Schuster")])
+    msg = render_pick_message(_Pick(), 1, 5, TODAY, "mode: jev, ok", "terms", who=who)
+    line = next(l for l in msg.text.split("\n") if l.strip().startswith("_who:_"))
+    assert "⭐ Dave Schuster (Stanford-Schuster), A. Collaborator" in line  # hit inside first-3: inline
+    assert "·" not in line  # no affiliations: no separator, no dangling punctuation
+
+
+def test_who_line_absent_who_renders_no_line():
+    msg = render_pick_message(_Pick(), 1, 5, TODAY, "mode: jev, ok", "terms")
+    assert "_who:_" not in msg.text
+
+
 # ── rate discipline ──────────────────────────────────────────────────────────────
 
 def test_rate_limit_never_faster_than_one_per_second():
