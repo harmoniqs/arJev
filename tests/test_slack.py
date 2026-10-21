@@ -242,7 +242,7 @@ def test_who_line_full_mode_fetches_and_renders(monkeypatch, tmp_path):
     assert "1 Department" not in pick  # the printed line is trimmed, not shown raw
 
 
-def test_who_line_full_mode_degrades_open_on_fetch_failure(monkeypatch, tmp_path):
+def test_who_line_full_mode_degrades_open_on_fetch_failure(monkeypatch, tmp_path, capsys):
     # the machine gate: who_line_failures_blocking_post == 0 — a broken PDF
     # renders authors + hits with no affiliations, and the post still lands
     isolate_state(monkeypatch, tmp_path)
@@ -267,6 +267,8 @@ def test_who_line_full_mode_degrades_open_on_fetch_failure(monkeypatch, tmp_path
     assert any("_who:_" in t for t in texts[1:])
     assert all("University" not in t for t in texts[1:])  # no guessed affiliation
     assert "roster hits" in texts[0]  # the header count rides even degraded
+    err = capsys.readouterr().err
+    assert "who-line" in err and "2601" in err  # the degradation is logged, never surfaced in Slack
 
 def test_rate_limit_never_faster_than_one_per_second():
     fake = FakeSlack()
