@@ -37,7 +37,8 @@ _ADDRESS_TAIL = re.compile(
     re.IGNORECASE,
 )
 _TRAILING_AND = re.compile(r"[;,]?\s*\b(and|&)\s*$", re.IGNORECASE)
-_ABSTRACT = re.compile(r"^\s*abstract\b", re.IGNORECASE)
+_ABSTRACT = re.compile(r"^\s*abstract", re.IGNORECASE)  # no \b: extraction can run the heading into the first word
+_EMAIL_PAREN = re.compile(r"\([^)]*@\)?[^)]*\)")
 _MARKER = re.compile(r"^[\s\d\u00b9\u00b2\u00b3\u2070-\u209f*\u2020\u2021\u00a7()\[\]]+[.,]?\s*")
 _DIGIT = re.compile(r"\d")
 
@@ -96,7 +97,7 @@ def parse_affiliations(first_page_text: str) -> list[str]:
         candidate = _TRAILING_AND.sub("", _MARKER.sub("", line))
         if not _INSTITUTION.search(candidate):
             continue
-        segments = [s.strip() for s in candidate.split(",") if s.strip()]
+        segments = [s.strip() for s in _EMAIL_PAREN.sub("", candidate).split(",") if s.strip()]
         while segments and _DEPARTMENT.match(segments[0]):
             segments = segments[1:]  # drop the leading department prefix
         while segments and _ADDRESS_TAIL.search(segments[-1]):

@@ -127,3 +127,28 @@ def test_dedupe_preserves_first_seen_order():
         "3 Google Quantum AI, Santa Barbara, CA\n4 Google Quantum AI, Santa Barbara, CA",
     )
     assert parse_affiliations(text).count("Google Quantum AI, Santa Barbara") == 1
+
+
+def test_email_parentheticals_are_stripped():
+    # seen live 2026-10-21: "University of Pisa, Pisa, Italy (e-mail: a@b.unipi.it)"
+    text = """A Broker for Quantum Computations
+A. Author, B. Author
+1 University of Pisa, Pisa, Italy (e-mail: a@b.unipi.it; c@d.unipi.it)
+2 University of Extremadura, Caceres, Spain (e-mail: x@unex.es)
+Abstract
+We broker computations.
+"""
+    affs = parse_affiliations(text)
+    assert affs == ["University of Pisa, Pisa", "University of Extremadura, Caceres"]
+    assert not any("@" in a or "e-mail" in a.lower() for a in affs)
+
+
+def test_run_together_abstract_heading_still_bounds():
+    # seen live 2026-10-21: extraction ran the heading into the first word —
+    # "ABSTRACTCloud-accessible..." — a word-boundary anchor misses it
+    text = """A Broker for Quantum Computations
+A. Author, B. Author
+1 University of Pisa, Pisa, Italy
+ABSTRACTCloud-accessible quantum computing has made heterogeneous Quantum Processing Units
+"""
+    assert parse_affiliations(text) == ["University of Pisa, Pisa"]
