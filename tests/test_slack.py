@@ -9,7 +9,7 @@ from arjev.cli import main
 from arjev.digest import run_digest
 from arjev.latex import latex_to_unicode
 from arjev.slack import DEFAULT_EMOJI_MAP, SlackClient, harvest_labels, render_pick_message
-from conftest import RSS, TODAY, VAULT, digest_cfg, isolate_state
+from conftest import RSS, TODAY, VAULT, _pdf_bytes, digest_cfg, isolate_state
 
 FIXTURES = Path(__file__).parent / "fixtures"
 KEEPERS = {"U0000000SYN"}
@@ -135,13 +135,14 @@ def test_who_line_full_format():
     from arjev.affil import WhoInfo
 
     who = WhoInfo(
-        authors=["Samuel A. Engel", "Dewei Gong", "Ziguang Lin", "Lysander Christakis", "Kang-Kuen Ni", "Norman Y. Yao"],
+        authors=["Samuel A. Engel", "Dewei Gong", "Ziguang Lin", "Lysander Christakis",
+                 "Kang-Kuen Ni", "Norman Y. Yao"],
         hits=[("Kang-Kuen Ni", "Harvard"), ("Norman Y. Yao", None)],
         affiliations=["Massachusetts Institute of Technology", "UC Berkeley"],
         more_affiliations=1,
     )
     msg = render_pick_message(_Pick(), 2, 5, TODAY, "mode: jev, ok", "terms", who=who)
-    line = next(l for l in msg.text.split("\n") if l.strip().startswith("_who:_"))
+    line = next(ln for ln in msg.text.split("\n") if ln.strip().startswith("_who:_"))
     assert "Samuel A. Engel, Dewei Gong, Ziguang Lin +3" in line
     assert "⭐ Kang-Kuen Ni (Harvard)" in line  # beyond-first-3 hit pulled in, group shown
     assert "⭐ Norman Y. Yao" in line  # bare roster entry: no group parens
@@ -152,9 +153,10 @@ def test_who_line_full_format():
 def test_who_line_inline_hit_and_absent_affiliations():
     from arjev.affil import WhoInfo
 
-    who = WhoInfo(authors=["Dave Schuster", "A. Collaborator"], hits=[("Dave Schuster", "Stanford-Schuster")])
+    who = WhoInfo(authors=["Dave Schuster", "A. Collaborator"],
+                  hits=[("Dave Schuster", "Stanford-Schuster")])
     msg = render_pick_message(_Pick(), 1, 5, TODAY, "mode: jev, ok", "terms", who=who)
-    line = next(l for l in msg.text.split("\n") if l.strip().startswith("_who:_"))
+    line = next(ln for ln in msg.text.split("\n") if ln.strip().startswith("_who:_"))
     assert "⭐ Dave Schuster (Stanford-Schuster), A. Collaborator" in line  # hit inside first-3: inline
     assert "·" not in line  # no affiliations: no separator, no dangling punctuation
 
@@ -167,29 +169,6 @@ def test_who_line_absent_who_renders_no_line():
 # ── rate discipline ──────────────────────────────────────────────────────────────
 
 # ── the who-line (issue #87) ──────────────────────────────────────────────────────
-
-def _pdf_bytes(lines):
-    """A minimal valid single-page PDF carrying exactly `lines` of Helvetica
-    text — pypdf extracts them verbatim, so the parse runs on realistic input."""
-    esc = lambda s: s.replace("(", "\\(").replace(")", "\\)")
-    content = "BT /F1 10 Tf 72 720 Td\n" + "".join(f"({esc(l)}) Tj 0 -14 Td\n" for l in lines) + "ET"
-    objs = [
-        "<< /Type /Catalog /Pages 2 0 R >>",
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
-        f"<< /Length {len(content)} >>\nstream\n{content}\nendstream",
-        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    ]
-    out = ["%PDF-1.4"]
-    offsets = [0]
-    for i, body in enumerate(objs, 1):
-        offsets.append(offsets[-1] + len(out[-1]) + 1)
-        out.append(f"{i} 0 obj\n{body}\nendobj")
-    xref_pos = sum(len(o) + 1 for o in out)
-    out.append(f"xref\n0 {len(objs)+1}\n0000000000 65535 f \n" + "".join(f"{off:010d} 00000 n \n" for off in offsets[1:])
-               + f"trailer\n<< /Size {len(objs)+1} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF")
-    return ("\n".join(out)).encode()
-
 
 def test_who_line_authors_mode_never_fetches_a_pdf(monkeypatch, tmp_path):
     # the machine gate: pdf_fetches_per_digest_under_authors_mode == 0
@@ -211,6 +190,25 @@ def test_who_line_authors_mode_never_fetches_a_pdf(monkeypatch, tmp_path):
     assert calls == []
     texts = [p["text"] for _, p in fake.calls]
     assert any("_who:_" in t for t in texts[1:])  # the author part still rides
+
+
+def test_who_line_none_style_renders_no_line(monkeypatch, tmp_path):
+    isolate_state(monkeypatch, tmp_path)
+    fake = FakeSlack()
+    cfg = digest_cfg()
+    cfg.slack_channel = "C0000000SYN"
+    cfg.papers_dir = str(tmp_path / "papers")
+    cfg.roots = [str(VAULT)]
+    cfg.who_style = "none"
+
+    def canary_fetcher(url):  # "none" is one step more inert than "authors"
+        raise AssertionError("who_style=none must not fetch a PDF")
+
+    run_digest(cfg, feed_file=str(RSS), today=TODAY, seed="s", post="slack",
+               slack_client=fake.client(), pdf_fetcher=canary_fetcher)
+    texts = [p["text"] for _, p in fake.calls]
+    assert all("_who:_" not in t for t in texts[1:])
+    assert "roster hits" not in texts[0]
 
 
 def test_who_line_full_mode_fetches_and_renders(monkeypatch, tmp_path):

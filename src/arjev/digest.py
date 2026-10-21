@@ -184,6 +184,23 @@ def run_digest(
         ranking="jev-first" if use_jev_first else "lexical-first",
     )
 
+    # the who-line data (issue #87): authors always, affiliations only in
+    # full mode, never fetched under "authors", never rendered under "none"
+    who_by_id = {}
+    if cfg.who_style != "none":
+        from .affil import build_who
+        from .directives import load_directives
+
+        roster = load_directives(cfg).authors
+        items_by_id = {i.identity.id: i for i in items}
+        who_by_id = {
+            p.identity.id: build_who(items_by_id[p.identity.id].authors, roster,
+                                      p.identity.id, Path(cfg.library_dir).expanduser()
+                                      if cfg.library_dir else None,
+                                      full=cfg.who_style == "full", fetcher=pdf_fetcher)
+            for p in picks if p.identity.id in items_by_id
+        }
+
     if post == "slack":
         if not cfg.slack_channel:
             raise SystemExit("slack_channel not configured (docs/slack-setup.md)")
@@ -191,22 +208,6 @@ def run_digest(
 
         sc = slack_client or SlackClient(token=slack_token())
         record.slack_channel = cfg.slack_channel
-        # the who-line data (issue #87): authors always, affiliations only in
-        # full mode, never fetched under "authors", never rendered under "none"
-        who_by_id = {}
-        if cfg.who_style != "none":
-            from .affil import build_who
-            from .directives import load_directives
-
-            roster = load_directives(cfg).authors
-            items_by_id = {i.identity.id: i for i in items}
-            who_by_id = {
-                p.identity.id: build_who(items_by_id[p.identity.id].authors, roster,
-                                          p.identity.id, Path(cfg.library_dir or "").expanduser()
-                                          if cfg.library_dir else None,
-                                          full=cfg.who_style == "full", fetcher=pdf_fetcher)
-                for p in picks if p.identity.id in items_by_id
-            }
         roster_hits = sum(1 for p in picks if who_by_id.get(p.identity.id) and who_by_id[p.identity.id].hits)
         roster_note = f" · {roster_hits} roster hits" if roster_hits else ""
         # the digest header: one message that reads AS the digest (the channel
@@ -229,7 +230,7 @@ def run_digest(
     if post == "vault":
         digest_dir = Path(cfg.digest_dir).expanduser() if cfg.digest_dir else cfg.expanded_roots[0] / "digests"
         note = render_vault_note(picks, feed_name, total=len(items), today=today, mode=mode,
-                                 skipped_corpus=len(ranked.skipped_corpus))
+                                  skipped_corpus=len(ranked.skipped_corpus), who_by_id=who_by_id)
         write_vault_note(note, digest_dir, today)
 
     # posted ids are consumed only by DURABLE posts — a stdout preview must not
