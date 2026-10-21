@@ -33,3 +33,7 @@ before. No implementation detail lives here.
 - **finalist enrichment** — The candidate-half content arm: after the first
   scoring pass, the top finalists are re-scored with their fetched
   conclusions/outlook in the state; fail-open, cached, never in the library.
+- **who-line** — The pick message's author-and-attribution line: authors as
+  the feed reports them, affiliations as the paper's own PDF prints them,
+  tracked-people matches highlighted. Never an inferred group — attribution
+  is either the paper's own printed claim or a curated roster label.
