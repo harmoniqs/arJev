@@ -53,6 +53,7 @@ class Config:
     slack_channel: str | None = None
     slack_keepers: list[str] = field(default_factory=list)
     why_style: str = "terms"  # terms | opaque | none
+    who_style: str = "authors"  # full | authors | none — issue #87; the PDF fetch stays opt-in
     emoji_map: dict[str, str] = field(default_factory=lambda: {"thumbsup": "keep", "eyes": "read-later", "x": "skip"})
 
     @property
@@ -112,6 +113,7 @@ def load_config(path: Path | None = None) -> Config:
     cfg.slack_channel = slack.get("channel")
     cfg.slack_keepers = list(slack.get("keepers", []))
     cfg.why_style = slack.get("why_style", cfg.why_style)
+    cfg.who_style = slack.get("who_style", cfg.who_style)
     if "emoji_map" in slack:
         cfg.emoji_map = dict(slack["emoji_map"])
     return cfg

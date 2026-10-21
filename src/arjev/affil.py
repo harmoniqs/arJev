@@ -7,7 +7,9 @@ ADR 0002: the paper's printed claim or human curation, never inference.
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
 # the institution-likeliness filter: a candidate line must contain one of these.
 # Broad by design — the paper claims the line; the parse only localizes it.
@@ -107,3 +109,38 @@ def parse_affiliations(first_page_text: str) -> list[str]:
             seen.add(key)
             affiliations.append(trimmed)
     return affiliations
+
+
+def build_who(authors: list[str], roster: list[str], arxiv: str, library_dir: Path | None,
+              full: bool, fetcher=None) -> WhoInfo:
+    """Assemble one pick's who-line data. Hits match the roster by the existing
+    surname + first-initial rule (suffix ignored) and render the PRINTED author
+    name with its curated group. In full mode affiliations come from the paper's
+    own PDF via the library-cached fetch; any failure degrades to authors-only —
+    it never blocks the post (issue #87's fail-open invariant)."""
+    from .directives import split_group
+    from .score import _name_match
+
+    who = WhoInfo(authors=list(authors))
+    seen_hits: set[str] = set()
+    for author in authors:
+        for entry in roster:
+            if _name_match(entry, [author]) and author not in seen_hits:
+                seen_hits.add(author)
+                who.hits.append((author, split_group(entry)[1]))
+    if full and library_dir is not None:
+        try:
+            from .keep import fetch_pdf
+            from .paper_content import pdf_text
+
+            path = fetch_pdf(arxiv, Path(library_dir), fetcher)
+            affiliations = parse_affiliations("\n".join((pdf_text(path) or "").splitlines()[:40]))
+            if len(affiliations) > 4:
+                who.more_affiliations = len(affiliations) - 4
+                affiliations = affiliations[:4]
+            who.affiliations = affiliations
+            if not affiliations:
+                print(f"who-line: no affiliations parsed for {arxiv}", file=sys.stderr)
+        except Exception as e:
+            print(f"who-line degraded for {arxiv}: {type(e).__name__}: {e}", file=sys.stderr)
+    return who
