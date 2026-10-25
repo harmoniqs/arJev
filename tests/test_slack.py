@@ -66,6 +66,13 @@ def test_latex_greek_and_operators():
     assert "π" in out and "α" in out and "≤" in out and "$" not in out
 
 
+def test_latex_paren_delimited_math():
+    # seen live 2026-10-25: arXiv titles also use the \\( … \\) inline-math form
+    assert latex_to_unicode("Engineering \\(XY\\) and \\(ZZ\\) interactions") == \
+        "Engineering XY and ZZ interactions"
+    assert latex_to_unicode("A \\(\\pi\\)-pulse") == "A π-pulse"
+
+
 # ── keepers enforcement ───────────────────────────────────────────────────────────
 
 def test_unauthorized_reactions_label_nothing():

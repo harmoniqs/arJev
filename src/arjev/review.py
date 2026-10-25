@@ -8,6 +8,7 @@ Read-only — it proposes, never stages; every count states its n (issue #83).""
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 
@@ -106,6 +107,50 @@ class Review:
         lines.extend(f"- {n}" for n in self.notes)
         return "\n".join(lines) + "\n"
 
+    def render_slack(self) -> str:
+        """The channel rendering — Slack mrkdwn, written for the people in the
+        channel: bold section titles, titles linked to arXiv, readable dates,
+        plain labels. The divergences and internal notes stay in render()'s file
+        report (found live 2026-10-25: raw Markdown read as noise in #papers)."""
+        if self.window_runs:
+            first, last = (_short_date(self.window_runs[i]["ts"]) for i in (0, -1))
+            span = first if first == last else f"{first} – {last}"
+            runs = len(self.window_runs)
+            head = f"*arJev week in review* · {span} · {runs} digest{'s' if runs != 1 else ''}"
+        else:
+            head = f"*arJev week in review* · no digests ran in the last {self.days} days"
+        lines = [head, ""]
+
+        lines.append(f"*Worth a look — relevant papers that missed a daily top 5* "
+                     f"({len(self.buried)} of {self.buried_total})")
+        if self.buried:
+            lines.extend(f"• {_slack_link(c)} — {_label(c)}" for c in self.buried)
+        else:
+            lines.append("_Nothing relevant was left out this week._")
+        lines.append("")
+
+        lines.append("*Your people* — papers by tracked authors")
+        if self.people:
+            for c in self.people:
+                authors = ", ".join(c["authors"][:3]) + (" et al." if len(c["authors"]) > 3 else "")
+                suffix = " · posted" if c.get("posted") else ""
+                lines.append(f"• {_slack_link(c)} — {authors}{suffix}")
+        else:
+            lines.append("_No tracked authors this week._")
+        lines.append("")
+
+        counts = self.receipts_counts
+        lines.append("*This week*")
+        lines.append(f"• {counts['posted']} picks posted · {counts['kept']} kept · {counts['skipped']} skipped")
+        if counts["labeled"]:
+            precision = self.calibration["precision_at_5"]
+            value = precision["precision"]
+            shown = f"{value:.0%}" if isinstance(value, float) else "n/a"
+            lines.append(f"• {shown} of top-5 picks were kept (n={precision['n']})")
+        else:
+            lines.append("• No reactions yet — 👍 or ❌ a pick to start calibrating the ranking.")
+        return "\n".join(lines) + "\n"
+
 
 def review(days: int = 7, now: date | None = None) -> Review:
     jp = journal_path()
@@ -177,10 +222,32 @@ def post_review(cfg: Config, report: Review, slack_client=None) -> str:
         from .slack import SlackClient
 
         slack_client = SlackClient(token=slack_token())
-    return slack_client.post_message(cfg.slack_channel, report.render())
+    return slack_client.post_message(cfg.slack_channel, report.render_slack())
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
+
+_ARXIV_SUFFIX = re.compile(r"\s*\(arXiv:[^)]*\)\s*$")
+
+
+def _short_date(ts: str) -> str:
+    d = datetime.fromisoformat(ts)
+    return f"{d:%b} {d.day}"
+
+
+def _slack_link(candidate: dict) -> str:
+    """A Slack mrkdwn link to the paper, the title cleaned of LaTeX and of the
+    '(arXiv:… [cat])' tail some feeds append, escaped for mrkdwn."""
+    from .latex import latex_to_unicode
+
+    title = _ARXIV_SUFFIX.sub("", latex_to_unicode(candidate.get("title") or candidate["arxiv"]))
+    title = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("|", "/")
+    return f"<https://arxiv.org/abs/{candidate['arxiv']}|{title}>"
+
+
+def _label(candidate: dict) -> str:
+    return ((candidate.get("jev") or {}).get("top") or "").replace("-", " ").replace("must read", "must-read")
+
 
 
 _LEVELS = ["must-read", "worth-reading", "borderline", "unlikely", "irrelevant"]  # jev.RELEVANCE_LEVELS

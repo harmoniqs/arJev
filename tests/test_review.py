@@ -293,7 +293,32 @@ def test_post_review_hands_the_report_to_the_client_seam():
     _write_state([_run("r1", TODAY_S, [_cand("2610.00080", "paper", jev_conf=0.7, lexical=1.0)])])
     report = review(days=7, now=TODAY)
     post_review(cfg, report, slack_client=_FakeSlack())
-    assert posted == [("C123", report.render())]
+    assert posted == [("C123", report.render_slack())]
+
+
+def test_slack_rendering_is_slack_native():
+    """Found live 2026-10-25: the review posted raw Markdown — '#' headings,
+    bare ids, ISO timestamps, internal jargon. The Slack rendering uses mrkdwn:
+    bold section titles, titles linked to arXiv, readable dates, plain labels,
+    and leaves the debugging-only divergence section to the file report."""
+    must = _cand("2610.00090", "A transmon CZ gate", jev_conf=0.59, lexical=40.0, top="must-read")
+    worth = _cand("2610.00091", "Kerr-cat entanglement", jev_conf=0.64, lexical=30.0, top="worth-reading")
+    _write_state([_run("r1", TODAY_S, [must, worth])])
+    text = review(days=7, now=TODAY).render_slack()
+    assert not any(line.startswith("#") for line in text.splitlines())  # no Markdown headings
+    assert "<https://arxiv.org/abs/2610.00090|A transmon CZ gate>" in text  # linked titles
+    assert "*Worth a look" in text  # bold, plain-language section title
+    assert "must-read" in text and "pool" not in text  # plain label, no internal jargon
+    assert "Oct 8" in text and "T09:00:00" not in text  # readable dates, no ISO stamps
+    assert "Divergences" not in text and "lexical" not in text  # debugging stays in the file report
+    assert "never stages" not in text  # internal doctrine notes stay out of the channel
+
+
+def test_file_report_keeps_the_full_detail():
+    """The file report (stdout / review-YYYYMMDD.md) keeps every section, including the divergences."""
+    _write_state([_run("r1", TODAY_S, [_cand("2610.00092", "paper", jev_conf=0.7, lexical=1.0)])])
+    text = review(days=7, now=TODAY).render()
+    assert "## The Divergences" in text
 
 
 def test_post_review_requires_a_configured_channel():

@@ -23,6 +23,7 @@ SUBSUP = {"+": "⁺", "-": "⁻", "0": "₀", "1": "₁", "2": "₂", "3": "₃"
 
 def latex_to_unicode(text: str) -> str:
     out = text
+    out = re.sub(r"\\\((.*?)\\\)", lambda m: "$" + m.group(1) + "$", out)  # \( … \) is $ … $
     out = re.sub(r"\$+[^$]*\$+", _clean_math, out)  # math spans first
     out = re.sub(r"\\text\{([^{}]*)\}", r"\1", out)
     out = re.sub(r"\\([a-zA-Z]+)", _macro, out)
