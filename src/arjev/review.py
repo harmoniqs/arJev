@@ -51,12 +51,14 @@ class Review:
         lines.append("")
 
         buried_header = (
-            f"## The Buried — the cap's casualties (top {len(self.buried)} of {self.buried_total} never-posted)"
+            f"## The Buried — the cap's casualties (top {len(self.buried)} of "
+            f"{self.buried_total} relevant, never posted)"
         )
         lines.append(buried_header)
         if self.buried:
             lines.extend(
-                f"- {c['arxiv']} — {c['title']} (jev {c['jev']['confidence']}, pool {c['pool']})" for c in self.buried
+                f"- {c['arxiv']} — {c['title']} (jev {c['jev'].get('top')} {c['jev']['confidence']:.2f}, "
+                f"pool {c['pool']})" for c in self.buried
             )
         else:
             lines.append("- nothing buried this window")
@@ -116,15 +118,15 @@ def review(days: int = 7, now: date | None = None) -> Review:
     report = Review(days=days, window_runs=window)
 
     candidates = [c for run in window for c in run.get("candidates", [])]
-    report.buried_total = sum(1 for c in candidates if not c.get("posted"))
+    report.buried_total = len({c["arxiv"] for c in candidates if not c.get("posted") and _is_relevant(c)})
     best_by_id: dict[str, dict] = {}
     for c in candidates:
-        if c.get("posted") or _jev_confidence(c) is None:
-            continue
+        if c.get("posted") or _jev_relevance(c) is None or not _is_relevant(c):
+            continue  # the buried are relevant papers the top-N cap dropped — nothing else
         incumbent = best_by_id.get(c["arxiv"])
-        if incumbent is None or _jev_confidence(c) > _jev_confidence(incumbent):
+        if incumbent is None or _jev_relevance(c) > _jev_relevance(incumbent):
             best_by_id[c["arxiv"]] = c
-    report.buried = sorted(best_by_id.values(), key=lambda c: (-_jev_confidence(c), c["arxiv"]))[:BURIED_LIMIT]
+    report.buried = sorted(best_by_id.values(), key=lambda c: (-_jev_relevance(c), c["arxiv"]))[:BURIED_LIMIT]
 
     people_by_id: dict[str, dict] = {}
     for c in candidates:
@@ -181,11 +183,29 @@ def post_review(cfg: Config, report: Review, slack_client=None) -> str:
 # ── helpers ─────────────────────────────────────────────────────────────────────
 
 
-def _jev_confidence(candidate: dict) -> float | None:
-    """The Jev row's confidence — None for absent rows and fail-open rows (a
-    lone fail_reason carries no judgment, so there is no mass to rank by)."""
-    confidence = (candidate.get("jev") or {}).get("confidence")
-    return float(confidence) if confidence is not None else None
+_LEVELS = ["must-read", "worth-reading", "borderline", "unlikely", "irrelevant"]  # jev.RELEVANCE_LEVELS
+_RELEVANT = ("must-read", "worth-reading")
+
+
+def _jev_relevance(candidate: dict) -> float | None:
+    """The Jev row's RELEVANCE as one sortable number — None for absent and
+    fail-open rows (a lone fail_reason carries no judgment). The journal keeps
+    only (top label, confidence in it), so the label orders first and the
+    confidence orders within it: a confident must-read beats an unsure one, and
+    any relevant label beats any borderline/unlikely/irrelevant one. Found live
+    2026-10-25: ranking by bare confidence put papers Jev was 100% sure were
+    *irrelevant* at the top of the week-in-review."""
+    jev = candidate.get("jev") or {}
+    confidence = jev.get("confidence")
+    if confidence is None or jev.get("top") not in _LEVELS:
+        return None
+    rank = len(_LEVELS) - _LEVELS.index(jev["top"])  # must-read 5 … irrelevant 1
+    signed = float(confidence) if jev["top"] in _RELEVANT else 1.0 - float(confidence)
+    return rank + signed
+
+
+def _is_relevant(candidate: dict) -> bool:
+    return (candidate.get("jev") or {}).get("top") in _RELEVANT
 
 
 def _divergence_lines(rows: list[dict]) -> list[str]:
@@ -193,7 +213,7 @@ def _divergence_lines(rows: list[dict]) -> list[str]:
     if not rows:
         return ["- none"]
     return [
-        f"- {c['arxiv']} — {c['title']} (jev {c['jev']['confidence']} rank #{c['jev_rank']} "
+        f"- {c['arxiv']} — {c['title']} (jev {c['jev'].get('top')} {c['jev']['confidence']:.2f} rank #{c['jev_rank']} "
         f"· lexical {c['lexical_score']} rank #{c['lexical_rank']})"
         for c in rows
     ]
@@ -213,8 +233,8 @@ def _divergences(window: list[dict]) -> tuple[list[dict], list[dict]]:
     jev_gaps: dict[str, dict] = {}
     lexical_gaps: dict[str, dict] = {}
     for run in window:
-        scored = [c for c in run.get("candidates", []) if _jev_confidence(c) is not None]
-        by_jev = sorted(scored, key=lambda c: (-c["jev"]["confidence"], c["arxiv"]))
+        scored = [c for c in run.get("candidates", []) if _jev_relevance(c) is not None]
+        by_jev = sorted(scored, key=lambda c: (-_jev_relevance(c), c["arxiv"]))
         by_lexical = sorted(scored, key=lambda c: (-c["lexical_score"], c["arxiv"]))
         ranks = {c["arxiv"]: (by_jev.index(c) + 1, by_lexical.index(c) + 1) for c in scored}
         for c in scored:

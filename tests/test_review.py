@@ -15,12 +15,12 @@ TODAY_S = "2026-10-08T09:00:00+00:00"
 OLD_S = "2026-09-20T09:00:00+00:00"
 
 
-def _cand(arxiv, title, *, jev_conf, lexical, pool="survivor", posted=False, authors=()):
+def _cand(arxiv, title, *, jev_conf, lexical, pool="survivor", posted=False, authors=(), top="worth-reading"):
     return {
         "arxiv": arxiv,
         "title": title,
         "jev": (
-            {"primitive": "score", "confidence": jev_conf, "top": "worth-reading"} if jev_conf is not None else None
+            {"primitive": "score", "confidence": jev_conf, "top": top} if jev_conf is not None else None
         ),
         "lexical_score": lexical,
         "pool": pool,
@@ -109,6 +109,22 @@ def test_the_buried_ranks_never_posted_by_jev_confidence():
     text = report.render()
     assert "2610.00003" in text and "buried best" in text
     assert "2610.00009" not in text.split("## The Buried", 1)[1].split("##", 1)[0]
+
+
+def test_the_buried_ranks_by_relevance_not_by_certainty_in_any_label():
+    """Found live 2026-10-25: the review ranked by Jev's confidence in its TOP
+    label, so papers Jev was 100% sure were *irrelevant* led "The Buried". The
+    journal carries (top, confidence); relevance is confidence for a relevant top
+    label and 1 - confidence otherwise — the same must-read + worth-reading mass
+    the digest ranks by, bounded from the one label the journal keeps."""
+    junk = _cand("2610.00040", "speech benchmark", jev_conf=1.0, lexical=1.0, top="irrelevant")
+    unsure_good = _cand("2610.00041", "quantum hardware", jev_conf=0.44, lexical=50.0, top="worth-reading")
+    must = _cand("2610.00042", "control paper", jev_conf=0.8, lexical=40.0, top="must-read")
+    _write_state([_run("r1", TODAY_S, [junk, unsure_good, must])])
+    report = review(days=7, now=TODAY)
+    assert [c["arxiv"] for c in report.buried] == ["2610.00042", "2610.00041"]  # junk is never "buried"
+    assert "2610.00040" not in [c["arxiv"] for c in report.jev_hot]  # nor "jev-hot"
+    assert "of 2 relevant, never posted" in report.render()
 
 
 def test_the_buried_dedupes_across_runs_keeping_best_confidence():
