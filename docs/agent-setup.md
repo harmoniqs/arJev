@@ -230,7 +230,7 @@ arjev ingest --slack-channel-id C0123456ABC --limit 200
   Without it: lexical-only, clearly flagged.
 - **Slack** (optional attention layer): see [slack-setup.md](slack-setup.md).
   **HUMAN STEP** — creating the Slack app requires their browser. Scopes:
-  `chat:write`, `reactions:read`, `conversations:replies`. Token in a mode-600
+  `chat:write`, `reactions:read`, `channels:history` (manifest: `docs/slack-app-manifest.yaml`). Token in a mode-600
   file; `ARJEV_SLACK_TOKEN` env. Set `channel` (the channel ID), `keepers`
   (user IDs whose reactions count as labels), `why_style` in the config.
 

@@ -1,0 +1,28 @@
+# arJev Slack app — paste into https://api.slack.com/apps → Create New App →
+# "From an app manifest" → pick your workspace → YAML tab → paste → Create.
+# Then: Install to Workspace → copy the Bot User OAuth Token (xoxb-…).
+#
+# Three bot scopes, each mapped to exactly one arJev surface:
+#   chat:write        — post the digest (one message per pick) and the review
+#   reactions:read    — harvest keeper reactions on picks into labels + stubs
+#   channels:history  — read thread replies (discussed labels) and human-shared
+#                       links (arjev ingest --slack-channel-id) in public channels
+# For a PRIVATE digest channel, add groups:history as well.
+display_information:
+  name: arJev
+  description: Daily arXiv digest ranked against your research vault
+  background_color: "#1a1a1a"
+features:
+  bot_user:
+    display_name: arJev
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - reactions:read
+      - channels:history
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

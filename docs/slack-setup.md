@@ -5,12 +5,20 @@ a `👍` on a pick message is a *keep* for that paper. Five minutes of setup, on
 
 ## 1. Create the app
 
+The fastest path is the manifest: [api.slack.com/apps](https://api.slack.com/apps) →
+**Create New App** → *From an app manifest* → pick your workspace → paste
+[`slack-app-manifest.yaml`](slack-app-manifest.yaml) → **Create**. Then skip to step 4.
+
+By hand instead:
+
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → *From scratch*.
 2. Name it (e.g. `arJev`), pick your workspace.
 3. **OAuth & Permissions** → add the three Bot Token Scopes:
    - `chat:write` — post digest picks
    - `reactions:read` — harvest 👍 / 👀 / ❌ on pick messages
-   - `conversations.replies` — harvest thread replies as `discussed` labels
+   - `channels:history` — read thread replies (`discussed` labels) and human-shared links
+     for `arjev ingest` in a public channel (add `groups:history` for a private one).
+     Slack has no `conversations:replies` scope — reading replies is a history scope.
 4. **Install to Workspace** → copy the **Bot User OAuth Token** (`xoxb-…`).
 5. Invite the bot to your digest channel: `/invite @arJev`.
 
