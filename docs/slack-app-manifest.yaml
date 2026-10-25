@@ -2,11 +2,12 @@
 # "From an app manifest" → pick your workspace → YAML tab → paste → Create.
 # Then: Install to Workspace → copy the Bot User OAuth Token (xoxb-…).
 #
-# Three bot scopes, each mapped to exactly one arJev surface:
+# Four bot scopes, each mapped to exactly one arJev surface:
 #   chat:write        — post the digest (one message per pick) and the review
 #   reactions:read    — harvest keeper reactions on picks into labels + stubs
 #   channels:history  — read thread replies (discussed labels) and human-shared
 #                       links (arjev ingest --slack-channel-id) in public channels
+#   channels:join     — lets the bot join the digest channel itself (no /invite)
 # For a PRIVATE digest channel, add groups:history as well.
 display_information:
   name: arJev
@@ -22,6 +23,7 @@ oauth_config:
       - chat:write
       - reactions:read
       - channels:history
+      - channels:join
 settings:
   org_deploy_enabled: false
   socket_mode_enabled: false

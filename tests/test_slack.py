@@ -73,6 +73,27 @@ def test_latex_paren_delimited_math():
     assert latex_to_unicode("A \\(\\pi\\)-pulse") == "A π-pulse"
 
 
+def test_http_transport_sends_form_encoded_params():
+    # found live 2026-10-25: the first real `slack sync` failed with
+    # no_item_specified — reactions.get and conversations.replies ignore JSON
+    # bodies. Every call goes form-encoded (accepted by all Web API methods).
+    import httpx
+
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={"ok": True, "message": {"reactions": []}})
+
+    client = SlackClient(token="xoxb-test", http_transport=httpx.MockTransport(handler), sleep=lambda s: None)
+    client.get_reactions("C123", "1792588238.347669")
+    request = seen[0]
+    assert request.headers["content-type"].startswith("application/x-www-form-urlencoded")
+    body = request.content.decode()
+    assert "channel=C123" in body and "timestamp=1792588238.347669" in body and "full=true" in body
+    assert request.headers["authorization"] == "Bearer xoxb-test"
+
+
 # ── keepers enforcement ───────────────────────────────────────────────────────────
 
 def test_unauthorized_reactions_label_nothing():
