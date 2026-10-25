@@ -23,17 +23,23 @@ MAX_BACKOFF_RETRIES = 2
 
 class SlackClient:
     def __init__(self, token: str, transport: Transport | None = None,
-                 sleep: Callable[[float], None] = time.sleep) -> None:
+                 sleep: Callable[[float], None] = time.sleep, http_transport=None) -> None:
         self.token = token
         self._transport = transport or self._http_transport
+        self._http = http_transport  # an httpx transport seam for wire-format tests
         self._sleep = sleep
         self._last_call = 0.0
 
     def _http_transport(self, method: str, payload: dict, token: str) -> dict:
         import httpx
 
-        with httpx.Client(timeout=30, headers={"authorization": f"Bearer {token}"}) as client:
-            r = client.post(f"https://slack.com/api/{method}", json=payload)
+        # form-encoded, not JSON: Slack's read methods (reactions.get,
+        # conversations.replies) ignore JSON bodies — found live 2026-10-25.
+        # Every Web API method accepts form encoding; booleans go as "true"/"false".
+        form = {k: (str(v).lower() if isinstance(v, bool) else str(v)) for k, v in payload.items()}
+        with httpx.Client(timeout=30, headers={"authorization": f"Bearer {token}"},
+                          transport=self._http) as client:
+            r = client.post(f"https://slack.com/api/{method}", data=form)
             r.raise_for_status()
             return r.json()
 
