@@ -1,5 +1,5 @@
 """The Slack surface: a dedicated bot app (scopes chat:write, reactions:read,
-conversations.replies — docs/slack-setup.md). Rate discipline: ≤ 1 request/s with 429
+channels:history — docs/slack-setup.md). Rate discipline: ≤ 1 request/s with 429
 backoff (obligation #18). Content boundary: feed-derived + matched terms (why_style-
 gated) + one probe confidence — never vault paths, note filenames, or why text
 (obligation #12). Keepers allowlist: unauthorized reactions label nothing (#10).
