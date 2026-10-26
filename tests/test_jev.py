@@ -208,6 +208,42 @@ def test_jev_mode_when_calls_succeed(monkeypatch, tmp_path):
     assert result.mode == "mode: jev, ok"
 
 
+class TitleKeyedTransport(FakeTransport):
+    """Per-paper distributions, keyed by a title fragment found in the request state."""
+
+    def __init__(self, by_title):
+        super().__init__()
+        self.by_title = by_title
+
+    def __call__(self, url, key, payload):
+        blob = json.dumps(payload)
+        self.score_mass = next(d for frag, d in self.by_title.items() if frag in blob)
+        return super().__call__(url, key, payload)
+
+
+def test_an_unsure_must_read_outranks_a_confident_irrelevant():
+    # found live 2026-10-22..26: a low-confidence answer was discarded to 0.0
+    # relevance, so a paper Jev called *must-read* at 0.47 sank below papers it
+    # called *irrelevant* at 0.61 (relevance mass ~0.05) — junk filled the top 5
+    # while 58 relevant papers went unposted. Uncertainty is already in the mass.
+    from arjev.rerank import apply_jev_first
+
+    items = [FeedItem(arxiv="2610.00001", title="Confident junk about gaussian splatting", abstract=""),
+             FeedItem(arxiv="2610.00002", title="Unsure gem on transmon gates", abstract="")]
+    profile = build_profile(fold_roots([VAULT], Config()), Config(), TODAY)
+    scored = {i.identity: score_item(i, profile) for i in items}
+    transport = TitleKeyedTransport({
+        "Confident junk": {"irrelevant": 0.61, "unlikely": 0.34, "worth-reading": 0.03, "must-read": 0.02},
+        "Unsure gem": {"must-read": 0.47, "worth-reading": 0.2, "borderline": 0.2, "irrelevant": 0.13},
+    })
+    picks, mode, candidates = apply_jev_first(items, scored, set(), client(transport), profile,
+                                             "run", [], top=2, pace_s=0)
+    assert [p.arxiv for p in picks] == ["2610.00002", "2610.00001"]
+    assert picks[0].jev_primary == pytest.approx(0.67)
+    rows = {c.arxiv: c for c in candidates}
+    assert rows["2610.00002"].jev["fail_reason"] == "low-confidence"  # still recorded honestly
+
+
 # ── pools wired; probe rescue ────────────────────────────────────────────────────
 
 def test_score_on_survivors_noul_on_nearmiss_and_probe(monkeypatch, tmp_path):
