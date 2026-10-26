@@ -239,7 +239,12 @@ arjev ingest --slack-channel-id C0123456ABC --limit 200
 ## 7. The daily run + timers
 
 One manual run first: `arjev digest --post slack` (or `vault`/`stdout`). The
-digest reads the configured `feeds` as one deduped union. Then a timer — Linux
+digest reads the configured `feeds` as one deduped union. To post to Slack AND
+write the dated digest note into the vault from the same run, list both:
+`arjev digest --post slack,vault` — one ranking (one Jev pass), the vault note
+written first, posted ids consumed once. A failure in one sink never costs the
+other: the run still prints, names the failed sink on stderr, and exits 1.
+`stdout` is the preview and cannot be combined with a durable sink. Then a timer — Linux
 systemd user unit (daily 13:00 UTC):
 
 ```ini
@@ -250,7 +255,7 @@ Persistent=true
 ```
 
 with a `.service` running a wrapper that exports the key env vars from their
-mode-600 files, then `arjev digest --top 5 --post slack` and `arjev slack sync`
+mode-600 files, then `arjev digest --top 5 --post slack,vault` and `arjev slack sync`
 (idempotent; harvests reactions → labels → staged stubs). macOS: a launchd plist
 with the same shape. **Check:** `systemctl --user list-timers` shows it armed
 (or `launchctl list` on macOS), and the first manual run posted.

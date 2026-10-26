@@ -105,6 +105,8 @@ The union is deduped across feeds (cross-listings score once), and ranked as one
 
 Each pick posts as its own message, so a 👍 maps 1:1 to a paper: reaction → label → **staged stub in your vault, automatically** — decision in Slack, memory in Obsidian. Thread replies count as `discussed`. A keepers allowlist decides whose reactions become labels. Full setup in **[docs/slack-setup.md](docs/slack-setup.md)** — five minutes, one Slack app.
 
+Sinks combine: `arjev digest --post slack,vault` ranks once and both posts to Slack and writes the day's dated digest note into the vault (`digest_dir`, else `<first root>/digests/`). The vault note is written first and is the durable record — a Slack outage never costs it, a vault write failure never blocks Slack, and either failure exits 1 naming the sink. `--post` takes `stdout` (the default preview, never combined), `vault`, `slack`, or a comma list of the last two.
+
 ## Have your agent set it up
 
 arJev is designed to be installed *by an AI agent on your behalf* — the interview, the schema mapping, Slack, seeding, timers, the staged prose loop, with acceptance checks at every step. Hand **[docs/agent-setup.md](docs/agent-setup.md)** to your agent and say "set this up for me." The runbook is field-agnostic: it works the same for a condensed-matter lab, an econ group, or a q-bio team.
