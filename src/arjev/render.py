@@ -42,14 +42,14 @@ def _why_terms(p: Pick, limit: int = 5) -> str:
 
 def render_mrkdwn(picks: list[Pick], feed_name: str, total: int, today: date, mode: str, skipped_corpus: int) -> str:
     header = f"*arXiv {feed_name} picks for {today.isoformat()}* ({len(picks)} of {total} new"
-    lines = [f"{header}, ranked against the lab corpus)", f"_{mode}_"]
+    lines = [f"{header}, ranked against your vault)", f"_{mode}_"]
     for i, p in enumerate(picks):
         lines.append(f"{i + 1}. <http://arxiv.org/abs/{p.arxiv}|{p.title}>")
         lines.append(f"   _why:_ {_why_terms(p)}")
     if not picks:
-        lines.append("_nothing matched the lab profile today_")
+        lines.append("_nothing matched your profile today_")
     if skipped_corpus:
-        lines.append(f"_{skipped_corpus} already in the lab corpus — skipped_")
+        lines.append(f"_{skipped_corpus} already in your vault — skipped_")
     return "\n".join(lines)
 
 
@@ -77,7 +77,7 @@ def render_vault_note(picks: list[Pick], feed_name: str, total: int, today: date
         if who is not None:
             lines.append(f"    - who: {render_who_line(who)}")
     if not picks:
-        lines.append("- nothing matched the lab profile today")
+        lines.append("- nothing matched your profile today")
     lines.append("")
     lines.append(f"_{skipped_corpus} in corpus · {total} new items_")
     return fm + "\n".join(lines) + "\n"

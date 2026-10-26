@@ -11,6 +11,8 @@ which field; the interview (step 2) asks.
 Follow it top to bottom. Every step has an acceptance check you run verbatim —
 do not claim a step done without its check passing. Ask the human only where a
 browser or a taste decision is genuinely theirs (marked **HUMAN STEP**).
+The human-facing version of these steps is [setup.md](setup.md); link the human
+there for anything they do by hand.
 
 ## 0. What you are building — and what you write
 
@@ -38,10 +40,11 @@ must respect:**
 ## 1. Install
 
 ```bash
-uv tool install git+https://github.com/harmoniqs/arJev@v0.3.0
+uv tool install git+https://github.com/harmoniqs/arJev
 ```
 
-(`pipx install` works too. Python 3.11+ required.)
+(`pipx install` works too. Python 3.11+ required. To pin, append `@vX.Y.Z`
+from the [changelog](../CHANGELOG.md).)
 
 **Check:** `arjev --version` prints a version.
 
@@ -224,48 +227,54 @@ arjev ingest --slack-channel-id C0123456ABC --limit 200
 
 ## 6. Keys (optional, both fail open)
 
-- **Jev** (semantic ranking of the full feed): get a key from
-  <https://console.typesafe.ai>, drop it in a mode-600 file, and set
-  `ARJEV_JEV_KEY_FILE=<path>` in the timer environment. Cost is ~pennies/day/feed.
-  Without it: lexical-only, clearly flagged.
-- **Slack** (optional attention layer): see [slack-setup.md](slack-setup.md).
-  **HUMAN STEP** — creating the Slack app requires their browser. Scopes:
-  `chat:write`, `reactions:read`, `channels:history` (manifest: `docs/slack-app-manifest.yaml`). Token in a mode-600
-  file; `ARJEV_SLACK_TOKEN` env. Set `channel` (the channel ID), `keepers`
-  (user IDs whose reactions count as labels), `why_style` in the config.
+Both credentials live in mode-600 files under `~/.config/arjev/`; a missing
+file disables that feature and nothing else.
 
-**Check:** with a Jev key, the digest's `mode:` line says `jev`.
+- **Jev** (semantic ranking of the full feed). **HUMAN STEP** — the human signs
+  up at <https://console.typesafe.ai> for their own key, then saves it:
+  `install -m 600 /dev/stdin ~/.config/arjev/jev.key`. arJev reads it through
+  `ARJEV_JEV_KEY_FILE`. Without it: lexical-only ranking, flagged in the `mode:` line.
+- **Slack** (optional attention layer). **HUMAN STEP** — creating the app needs
+  their browser. Walk them through [slack-setup.md](slack-setup.md): create the
+  app from `docs/slack-app-manifest.yaml` (four scopes: `chat:write`,
+  `reactions:read`, `channels:history`, `channels:join`), save the token to
+  `~/.config/arjev/slack-token` (read through `ARJEV_SLACK_TOKEN_FILE`), and set
+  `[slack] channel` (the channel **ID**), `keepers`, `who_style`, `why_style`.
+  Never put a token in the config or a repo.
+
+**Check:** `ARJEV_JEV_KEY_FILE=~/.config/arjev/jev.key arjev digest` shows
+`mode: jev`. With Slack: `ARJEV_SLACK_TOKEN_FILE=~/.config/arjev/slack-token arjev slack sync`
+exits 0.
 
 ## 7. The daily run + timers
 
-One manual run first: `arjev digest --post slack` (or `vault`/`stdout`). The
-digest reads the configured `feeds` as one deduped union. To post to Slack AND
-write the dated digest note into the vault from the same run, list both:
-`arjev digest --post slack,vault` — one ranking (one Jev pass), the vault note
-written first, posted ids consumed once. A failure in one sink never costs the
-other: the run still prints, names the failed sink on stderr, and exits 1.
-`stdout` is the preview and cannot be combined with a durable sink. Then a timer — Linux
-systemd user unit (daily 13:00 UTC):
+`arjev daily` is the whole day in one command: the digest (retried with backoff
+when arXiv's RSS is flaky; a quiet day on weekends, when arXiv publishes
+nothing), then — when a Slack token and channel are configured — ingest of
+shared papers and `slack sync`; on Sundays, the calibration report and the
+week-in-review. Without Slack, the digest goes to the vault note only. Run it
+once by hand first:
 
-```ini
-# ~/.config/systemd/user/arjev-digest.timer
-[Timer]
-OnCalendar=*-*-* 13:00:00 UTC
-Persistent=true
+```bash
+arjev daily
 ```
 
-with a `.service` running a wrapper that exports the key env vars from their
-mode-600 files, then `arjev digest --top 5 --post slack,vault` and `arjev slack sync`
-(idempotent; harvests reactions → labels → staged stubs). macOS: a launchd plist
-with the same shape. **Check:** `systemctl --user list-timers` shows it armed
-(or `launchctl list` on macOS), and the first manual run posted.
+Then schedule it with the shipped units, which set both credential file paths:
+on Linux the systemd service + timer in `contrib/systemd/`, on macOS the
+launchd plist in `contrib/launchd/`. The exact install commands are in
+[setup.md](setup.md#9-run-it-every-day); on Linux also run
+`loginctl enable-linger "$USER"` so the timer fires while they're logged out.
+
+**Check:** `systemctl --user list-timers` lists `arjev-daily.timer` (or
+`launchctl list | grep arjev` on macOS), and the manual `arjev daily` ended
+with `done`.
 
 ## 8. The staged loop — your prose obligation
 
 Keeping a paper (Slack reaction, `arjev keep`, or a checkbox) scaffolds a note
 with `status: staged` — metadata only, zero taste contribution until prose
 exists. Writing that prose is **your** obligation (the model can't; the tool
-won't):
+won't). Schedule this pass right after the daily run:
 
 1. Pull the worklist: `arjev staged` — one stable line per staged note,
    `id | title | kept-when | kept-by`, and nothing else.
@@ -284,12 +293,11 @@ this pass with the daily run.
 
 - React 👍/👀/❌ on picks (if keepers-listed) — each becomes a label + a vault stub.
 - Fill `rating:` and `why:` on notes — that's what makes notes taste.
-- `arjev calibrate` (weekly; add it to the timer on Sundays) — read the report;
-  thresholds are human-applied, by design.
-- `arjev review --days 7` (Sundays, after the digest) — the across-days view:
-  the buried, the roster matches, the divergences, the week's receipts. Read-only,
-  deterministic, n-stated; posts with `arjev review --days 7 --post slack` if the
-  channel is configured.
+- `arjev calibrate` — the weekly report (`arjev daily` writes it to the state
+  dir on Sundays); thresholds are human-applied, by design.
+- `arjev review --days 7` — the week-in-review: relevant papers that missed a
+  daily top 5, tracked-author matches, and the week's labels. `arjev daily`
+  posts it to Slack on Sundays.
 - Rate-proposals: `arjev rate propose` asks the model for advisory first-pass
   ratings (side table only, vault untouched); `arjev rate accept <arxiv>
   <core|useful|marginal>` is the human gate that writes the rating.
@@ -299,9 +307,11 @@ this pass with the daily run.
 - **`feeds not configured`** at digest, or `blocked: no feeds configured` at
   `arjev inspect` — the `feeds` slot is empty; fill it from the taxonomy, never
   with a guessed default.
-- **"feed parsed to zero items"** — arXiv RSS occasionally returns junk mid-day;
-  the digest refuses to post empty and the next run recovers.
-- **Slack `missing_scope`** — the app lacks a scope; the setup doc lists all three.
+- **`feed failure — every configured feed returned 0 items`** — on a weekday,
+  arXiv RSS is briefly empty and `arjev daily` retries; on Saturday or Sunday it
+  is expected (no new listings) and logged as a quiet weekend.
+- **Slack `missing_scope`** — the app lacks a scope; recreate it from the manifest.
+- **Slack `not_in_channel`** — the bot isn't in the digest channel; `/invite @arJev`.
 - **`profile-degraded` in the mode line** — fewer than 5 notes or no `why` lines
   yet; seed more, or write a few (that's your job anyway — step 8).
 - **A type mismatch** (`fold type-matched: 0` but `fold identity-bearing` healthy)

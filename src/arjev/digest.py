@@ -109,9 +109,17 @@ def fingerprint_picks(picks: list[Pick]) -> str:
 
 
 def slack_token() -> str:
+    """ARJEV_SLACK_TOKEN, else the contents of ARJEV_SLACK_TOKEN_FILE — the same
+    file form the Jev key takes, so the token can stay in a mode-600 file."""
     token = os.environ.get("ARJEV_SLACK_TOKEN")
+    if not token and (path := os.environ.get("ARJEV_SLACK_TOKEN_FILE")):
+        try:
+            token = Path(path).expanduser().read_text().strip()
+        except OSError:
+            token = None
     if not token:
-        raise SystemExit("ARJEV_SLACK_TOKEN not set (docs/slack-setup.md)")
+        raise SystemExit("no Slack token: set ARJEV_SLACK_TOKEN_FILE to a mode-600 token file, "
+                         "or ARJEV_SLACK_TOKEN (docs/slack-setup.md)")
     return token
 
 
@@ -266,7 +274,7 @@ def run_digest(
         sc.post_message(
             cfg.slack_channel,
             f"*arJev daily digest — {today.isoformat()}* — {len(picks)} picks · {mode} · "
-            f"{len(items)} new items ranked against the lab vault{roster_note}",
+            f"{len(items)} new items ranked against your vault{roster_note}",
         )
         for i, p in enumerate(picks):
             msg = render_pick_message(p, i + 1, len(picks), today, mode, cfg.why_style,
