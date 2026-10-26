@@ -7,140 +7,113 @@
 
 <p align="center"><em>Your daily arXiv, ranked against your vault.</em></p>
 
-# arJev
+**arJev** reads the new papers in the arXiv categories you follow every day,
+ranks them against your Obsidian vault — the papers you've read, kept, and
+written about — and sends you the few worth your time, each with a reason. Your
+reactions teach it, so the picks improve the longer you use it.
 
-A daily arXiv digest engine that ranks against your **living Obsidian vault** — so the picks get better every week you use it, because *you* are the training data.
+It works for any field that posts to arXiv, from condensed matter to economics,
+and it reads nothing but arXiv. It never picks categories for you.
 
-arJev serves **any field that posts to arXiv** — condensed matter, economics, quantitative biology, mathematics, any discipline with an arXiv category — and it sources nothing beyond arXiv: no PubMed, no RePEc, no journal feeds. If your field doesn't post to arXiv, arJev is not for you yet, and it will never silently rank a category you didn't choose.
+## What a pick looks like
 
-## The context engine: how your corpus becomes the ranking
+Each pick arrives in the terminal, a dated note in your vault, or a Slack channel:
 
-The design invariant: **your corpus can grow without bound; the model's window never does — and that's the mechanism, not a limitation.**
+```text
+arJev pick 2/5 for 2026-10-21 — mode: jev, ok
+Parallel Omnidirectional Atom Rearrangement with Dynamic Holograms
+   who: Samuel A. Engel, Dewei Gong, Ziguang Lin +3 · Harvard University, Cambridge, Harvard-MIT Center for Ultracold Atoms, Cambridge
+   why: control, quantum, transport, array, atoms (score 5496.1)
+```
 
-Every digest runs the same fold:
+The *why* line shows which of your interests it matched. The *who* line shows
+the authors, a ⭐ when someone you track wrote it, and the institutions printed
+on the paper itself.
 
-1. **Fold** — every note under your roots is scanned once; the papers you've kept become first-class records (title, your `why` line, your rating, tags, the vault's wikilink graph).
-2. **Taste cards** — each kept paper becomes a card: your why, the paper's own abstract, and its conclusions/outlook section (extracted from your local PDF library; your directives ride whole and first). Every card carries a 180-day half-life decay and your own rating verdict.
-3. **The budgeted window** — every candidate is judged against a fixed, byte-budgeted context assembled fresh for it: your directives, then cards, terms, and why-lines filled greedily by recency-weighted priority.
+## How it works
 
-Two phases fall out of that one mechanism:
+- **Your vault is the taste profile.** arJev reads your paper notes — what you
+  kept, how you rated it, the one line on why it mattered — plus an optional
+  note where you say in plain English what you want more and less of.
+- **Every new paper gets judged.** With a [Jev](https://typesafe.ai) key, a
+  small calibrated model screens every paper in your feeds, so relevant work
+  surfaces even when it shares no keywords with your notes. Without a key,
+  arJev ranks by your vault's vocabulary.
+- **Your reactions are the training data.** 👍 keeps a paper (it becomes a
+  vault note), 👀 saves it for later, ❌ skips it. Kept papers shape tomorrow's
+  ranking once they're written up.
+- **It never writes your notes.** The ranking model only makes decisions; every
+  sentence in your vault comes from you or an AI agent you choose.
 
-- **Small corpus → maximal fill.** When you've kept a handful of papers, everything you've ever kept rides the window — the early picks are judged against all of it.
-- **Growing corpus → recency-proportional width.** As the corpus grows past the window, the decay ranking gives recent work proportionally more of it. A paper read 300 days ago holds a quarter the width of one read 90 days ago. No reconfiguration — the window tracks your drift.
-
-The corpus never rides into the model wholesale: the fold is a local, linear scan, and the model's context is a fixed-budget summary regardless of vault size. A 10,000-note vault costs the same per digest as a 10-note one.
-
-### The numbers
-
-What the window holds, per budget (generic):
-
-| Taste budget | What rides |
-|---|---|
-| 2.5 KB (default) | full directives + ~15 weighted terms + recent why-lines |
-| 8 KB | full directives + ~4–6 recent taste cards (abstract + conclusions + why) + terms |
-| 12 KB | full directives + ~8–10 cards + terms — around 12% of the model's context window |
-
-What it costs (measured in daily use at [Harmoniqs](https://harmoniqs.ai), three feeds):
-
-- **~650–980 papers screened per day** — every item in the multi-feed union is scored; the full feed is never truncated.
-- **~470 model calls per digest** (every eligible item is screened by [Jev](https://typesafe.ai), the calibrated ranking model), **median 171 ms** per call, p90 212 ms.
-- **~$0.02/day** at the default budget; the largest arm (a 12 KB taste budget) is still ~$0.08/day. The model's own window is 32k tokens — the largest arm uses about an eighth of it.
-- **105 paper notes, a 64-PDF library**, and a median digest call already running at 99% of the old fixed budget — which is exactly why the budget became a knob.
-
-The honest caveat that shaped this design: the vendor documents *context rot* — accuracy falls as irrelevant state grows. So every enlargement is an **opt-in arm gated on measurement**: `arjev calibrate --replay-arms` re-scores your labeled candidates under each arm and reports Brier, precision@5, and the realized state size per arm, with honest n. Defaults flip only on a measured win, and the tool never edits its own config.
-
-## The division of labor
-
-Three sentences are the product:
-
-- **The decision model judges.** [Jev](https://typesafe.ai), the ranking model, is text-free by design: it scores, rescues, and rates with calibrated confidence, and it can never write a sentence. Every call is a typed decision, logged as a receipt.
-- **Your agent writes — or your own hand does.** All the prose in the loop (note bodies, why-lines, takes on the picks) comes from an LLM agent or from you. The tool itself never writes prose and never edits an existing note.
-- **The vault stays yours.** Your Obsidian vault is the source of truth: the taste profile is folded from your paper notes, your authored **taste directives** state in plain English what you want, and papers you keep become ground truth. Slack is an optional attention layer on top — the vault is the product.
-
-## Two ways to start
-
-**You already have a vault.** Your agent maps it: every note field is remappable (Zotero-style exports, bare-DOI notes, any custom schema), and `arjev inspect` proves the mapping landed by printing exactly what the config sees — checklist state, notes scanned, identity-bearing count — and exiting nonzero when something blocks.
-
-**You're starting fresh.** `arjev init` writes the config as a **checklist-file**: every decision slot (feeds, note-type, identity fields, taste knobs) carries its own one-line explanation, `feeds` starts empty, and your agent fills the file in with you — one interview question at a time. `arjev inspect` proves it green before the first digest.
-
-**No agent?** The same loop, your hand: `arjev init` → edit the file (every slot explains itself inline) → `arjev inspect` → `arjev digest`. The hand path is the same contract traversed slower — nothing here requires an agent.
-
-## Install
-
-Python 3.11+:
+## Quick start
 
 ```bash
-uv tool install git+https://github.com/harmoniqs/arJev@v0.4.1
-arjev init --vault /path/to/your/vault  # writes the checklist-file config
-# fill feeds = [...] with your arXiv categories — yours or your agent's hand
-arjev inspect                           # proves the config green (exit 0)
-arjev digest                            # today's picks, explainable, to stdout
+uv tool install git+https://github.com/harmoniqs/arJev
+arjev init --vault ~/path/to/your/vault      # writes ~/.config/arjev/arjev.toml
+# edit the config: set feeds = ["your", "arxiv", "categories"]
+arjev inspect                                # checks the setup (exit 0 = ready)
+arjev digest                                 # today's picks, printed
 ```
 
-Point it at any Obsidian vault with literature notes (a frontmatter `type` value and an `arxiv:` or `doi:` identity field — both remappable for any schema). No vault yet? `arjev ingest` seeds one from what you already have.
+No paper notes yet? Seed the vault from a Zotero or Google Scholar export with
+`arjev ingest --bibtex library.bib`, or from a folder of PDFs.
 
-## The loop, and the staged worklist
+**Full setup** — your existing notes, a Jev key, Slack, and a daily
+schedule — is in **[docs/setup.md](docs/setup.md)**, about fifteen minutes.
+**Using an AI agent?** Hand it **[docs/agent-setup.md](docs/agent-setup.md)**
+and say "set this up for me".
 
-1. **Digest** — every day, the full multi-feed union is screened and ranked against the vault's taste profile; each pick carries its why-line.
-2. **Keep** — a Slack reaction, `arjev keep`, or a checkbox scaffolds the paper into your vault as a note with `status: staged` — metadata only, zero taste contribution until prose exists. The staged gate is exact: an untouched stub provably changes nothing (the fold audits this every digest).
-3. **Write** — `arjev staged` lists the staged notes awaiting prose; your agent (or your hand) writes each note's body and `why` line, then flips `status: staged` → `status: written` in the frontmatter.
-4. **Enrich the library** — `arjev fetch <arxiv-id>` downloads the paper's PDF into your library and emits the extracted text alongside it; `arjev backfill` does the whole corpus at once (paced, idempotent, arXiv-polite, converging on libraries that predate it). Library text is what gives each kept paper its abstract and conclusions inside the taste cards — a paper without it still counts, just with less to say. (A digest under the greedy policy also pays a missing PDF's extraction once, writing the `.txt` back — idempotent, same content fetch would write.)
-5. **Learn** — a written body feeds taste exactly like a hand-authored note's; `arjev calibrate` replays past digests against your labels and reports Brier scores, reliability, precision@5 — with honest n, never fake confidence.
+## Every day
 
-## Why
+Schedule `arjev daily` once (the [setup guide](docs/setup.md#9-run-it-every-day)
+ships systemd and launchd files) and it runs the whole day: the digest, retried
+if arXiv's feed is flaky; Slack ingest and reaction sync; and on Sundays, a
+week-in-review of good papers that missed a daily top 5.
 
-Keyword-based paper alerts miss everything that isn't spelled the same way ("jitter robustness" never matches "amplitude noise"), never learn from what you actually read, and can't be installed by anyone outside the lab that built them. arJev fixes all three:
+| You | arJev |
+|---|---|
+| 👍 a pick in Slack | creates a vault note for it, waiting for a summary |
+| 👀 / ❌ a pick | saves it to read later / marks it not for you |
+| reply in a pick's thread | marks it discussed |
+| write a kept note's summary and `why:` | uses it to rank tomorrow's papers |
 
-- **A decision model at the front line.** With a [Jev](https://typesafe.ai) key (the default), a cheap, calibrated model screens the **full feed** — every item, every day — so papers with zero keyword overlap still surface when they're relevant. Every call is a logged receipt.
-- **The vault still explains every pick.** Your taste profile supplies the matched terms on each why-line and the tiebreak — and it carries the whole digest without a key: no Jev, no outage, no problem; the ranking falls back to the deterministic lexical order and the `mode:` line says exactly which engine ran.
-- **A learning loop with a budget that scales.** The corpus grows, the context window doesn't — and every enlargement of that window earns its keep through measured calibration, not fashion.
+## Commands
 
-## Seeding and taste
+| Command | What it does |
+|---|---|
+| `arjev init --vault PATH` | writes a commented starter config |
+| `arjev inspect` | shows what the config sees; exits 1 if setup is incomplete |
+| `arjev digest` | ranks today's papers; `--post vault`, `--post slack`, or `--post slack,vault` to deliver |
+| `arjev daily` | the whole day, for a timer |
+| `arjev ingest --bibtex FILE` | seeds the vault (also `--pdf-dir`, `--slack-channel-id`) |
+| `arjev keep ARXIV_ID` | keeps a paper from a digest as a vault note |
+| `arjev staged` | lists kept notes still waiting for a write-up |
+| `arjev fetch ARXIV_ID` | downloads a paper's PDF into your library |
+| `arjev backfill` | fetches PDFs for every paper in the vault |
+| `arjev slack sync` | turns Slack reactions and replies into labels |
+| `arjev labels sync` | records keeps from checked boxes in vault digest notes |
+| `arjev review --days 7` | the week-in-review (`--post slack` to share it) |
+| `arjev calibrate` | how well the ranking matches your reactions |
+| `arjev rate propose` | suggests ratings for your notes; `arjev rate accept` applies one |
 
-- `arjev ingest --bibtex library.bib` — from a Google Scholar or Zotero export
-- `arjev ingest --pdf-dir ~/papers` — from a PDF collection (ids from filenames or the arXiv stamp)
-- `arjev ingest --slack-channel-id C0123456ABC` — from the papers **people** share in your Slack (bot posts are filtered; each seeded note carries who/where/when provenance)
-- **Taste directives** — drop an `arjev-directives.md` in your vault: labs, companies, topics as lists, plus a prose body that rides first-class into the model's state. You write taste in English; the ranking follows.
+Every command takes `--config PATH`, and `--help` on any command lists its options.
 
-## Multi-feed
+## Documentation
 
-```toml
-feeds = ["cond-mat.mes-hall", "econ.TH", "q-bio.NC"]
-```
-
-The union is deduped across feeds (cross-listings score once), and ranked as one list. No category is ever defaulted: an empty `feeds` blocks the digest with a plain-language error naming the slot.
-
-## Slack, on top of the vault (optional)
-
-Each pick posts as its own message, so a 👍 maps 1:1 to a paper: reaction → label → **staged stub in your vault, automatically** — decision in Slack, memory in Obsidian. Thread replies count as `discussed`. A keepers allowlist decides whose reactions become labels. Full setup in **[docs/slack-setup.md](docs/slack-setup.md)** — five minutes, one Slack app.
-
-Sinks combine: `arjev digest --post slack,vault` ranks once and both posts to Slack and writes the day's dated digest note into the vault (`digest_dir`, else `<first root>/digests/`). The vault note is written first and is the durable record — a Slack outage never costs it, a vault write failure never blocks Slack, and either failure exits 1 naming the sink. `--post` takes `stdout` (the default preview, never combined), `vault`, `slack`, or a comma list of the last two.
-
-## Have your agent set it up
-
-arJev is designed to be installed *by an AI agent on your behalf* — the interview, the schema mapping, Slack, seeding, timers, the staged prose loop, with acceptance checks at every step. Hand **[docs/agent-setup.md](docs/agent-setup.md)** to your agent and say "set this up for me." The runbook is field-agnostic: it works the same for a condensed-matter lab, an econ group, or a q-bio team.
-
-## Prose: the two seams
-
-arJev's core is deliberately **text-free** — deterministic rendering, and the decision model can't generate strings by design. Prose rides two seams, both filled by your agent (or your hand):
-
-- **Enrich (digest out)** — configure `enrich_command` and arJev pipes the canonical picks JSON to it, appending whatever comes back to the digest. Any LLM CLI works; **[docs/amicode-integration.md](docs/amicode-integration.md)** has the contract.
-- **Write (vault in)** — the staged worklist above: `arjev staged` is the pull, and the prose lands in your notes where you review it like any other vault edit.
-
-## Calibration, honestly
-
-`arjev calibrate` joins the label ledger, the digest journal, and the decision receipts: Brier per primitive, reliability bins, precision@5. The report states its n, names its censoring (labels only exist for papers you were shown), and recommends thresholds — **you** apply them; the tool never tunes itself.
-
-`arjev calibrate --replay-arms` goes one further: it re-assembles each labeled candidate's context under every state arm — the incumbent fixed budget, the budget-greedy policy at 4/8/12 KB, each with and without candidate conclusions — re-scores them live (conclusions fetched once, paced, from the shared cache), and reports Brier, n, and the realized state size per arm. That report is the only road to changing a default in this tool.
-
-## The week-in-review
-
-The daily digest is capped at top-5 and sees one day of the firehose. `arjev review --days 7` is the across-days view: a pure re-read of the journal the digests already wrote — no fetches, no model calls, deterministic — in four sections. **The Buried**: the week's never-posted candidates re-ranked by Jev confidence (the cap's casualties). **Your People**: the author-lane matches, posted or not. **The Divergences**: the two tails where Jev and the words disagreed. **The Week's Receipts**: kept vs. skipped with the calibration headline, every n stated. Read-only — the review proposes, never stages; `arjev review --post slack` sends it to the channel the digest posts to.
-
-One network disclosure: corpus content resolves from local files only. The candidate-content arm is the one fetch a digest can make — bounded to the finalists, paced at 3 s, cached in the state dir, and fail-open: a dead network degrades that arm to abstract-only and the digest still ships, with the `mode:` line saying what ran.
+| | |
+|---|---|
+| [docs/setup.md](docs/setup.md) | step-by-step setup and troubleshooting |
+| [docs/slack-setup.md](docs/slack-setup.md) | the Slack app, in five minutes |
+| [docs/agent-setup.md](docs/agent-setup.md) | the runbook for an AI agent installing arJev |
+| [docs/architecture.md](docs/architecture.md) | how ranking, the context window, and calibration work |
+| [docs/amicode-integration.md](docs/amicode-integration.md) | connecting an agent to write notes and enrich digests |
+| [CONTEXT.md](CONTEXT.md) · [docs/adr/](docs/adr/) | the glossary and design decisions |
+| [CHANGELOG.md](CHANGELOG.md) | what changed in each release |
+| [AGENTS.md](AGENTS.md) | working on arJev itself — layout, tests, releases |
 
 ## Status
 
-v0.4.1. v1 in daily use at [Harmoniqs](https://harmoniqs.ai). [Issue #1](https://github.com/harmoniqs/arJev/issues/1) is the plan of record (spec, compiled plan, obligation register); the context engine is [issue #75](https://github.com/harmoniqs/arJev/issues/75); the week-in-review is [issue #83](https://github.com/harmoniqs/arJev/issues/83).
+In daily use at [Harmoniqs](https://harmoniqs.ai) since October 2026. The plan
+of record is [issue #1](https://github.com/harmoniqs/arJev/issues/1).
 
 Apache-2.0.

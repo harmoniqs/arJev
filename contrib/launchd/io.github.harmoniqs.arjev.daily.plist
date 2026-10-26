@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  arJev daily digest for macOS. launchd does not expand ~ or $HOME, so install it
+  with the one-liner in docs/setup.md, which substitutes __HOME__ for you.
+  StartCalendarInterval is LOCAL time: 9:00 matches 13:00 UTC in US Eastern
+  daylight time; adjust Hour for your timezone.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.github.harmoniqs.arjev.daily</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/.local/bin/arjev</string>
+    <string>daily</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ARJEV_JEV_KEY_FILE</key>
+    <string>__HOME__/.config/arjev/jev.key</string>
+    <key>ARJEV_SLACK_TOKEN_FILE</key>
+    <string>__HOME__/.config/arjev/slack-token</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/arjev-daily.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/arjev-daily.log</string>
+</dict>
+</plist>

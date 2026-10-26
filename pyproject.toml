@@ -1,15 +1,32 @@
 [project]
 name = "arjev"
-version = "0.5.6"
+version = "0.6.0"
 description = "A daily arXiv digest engine that ranks against your living Obsidian vault."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
+authors = [{ name = "Harmoniqs" }]
+keywords = ["arxiv", "obsidian", "papers", "research", "digest", "slack"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering",
+]
 dependencies = [
   "PyYAML>=6.0",
   "httpx>=0.27",
   "pypdf>=4.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/harmoniqs/arJev"
+Documentation = "https://github.com/harmoniqs/arJev/blob/main/docs/setup.md"
+Changelog = "https://github.com/harmoniqs/arJev/blob/main/CHANGELOG.md"
+Issues = "https://github.com/harmoniqs/arJev/issues"
 
 [project.optional-dependencies]
 dev = [

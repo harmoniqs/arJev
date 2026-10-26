@@ -16,7 +16,7 @@ import pytest
 from arjev.cli import main
 
 REPO = Path(__file__).resolve().parents[1]
-DOCS = [REPO / "README.md", REPO / "CONTEXT.md", *sorted((REPO / "docs").rglob("*.md"))]
+DOCS = [REPO / "README.md", REPO / "CONTEXT.md", REPO / "AGENTS.md", *sorted((REPO / "docs").rglob("*.md"))]
 
 # a documented command: a fence line leading with arjev (shell prompts allowed),
 # or an inline code span opening with it — `arjev.toml`/`arjev-digest.timer`

@@ -1,0 +1,14 @@
+[Unit]
+Description=arJev daily digest (digest, ingest, slack sync; Sundays add the review)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Credentials stay in mode-600 files; a missing file just disables that feature
+# (no Jev key → lexical-only ranking; no Slack token → vault-only digest).
+Environment=ARJEV_JEV_KEY_FILE=%h/.config/arjev/jev.key
+Environment=ARJEV_SLACK_TOKEN_FILE=%h/.config/arjev/slack-token
+ExecStart=%h/.local/bin/arjev daily
+# room for the digest's retries on a flaky feed (5 attempts, 10 min apart)
+TimeoutStartSec=5400

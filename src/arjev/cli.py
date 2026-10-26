@@ -1,4 +1,4 @@
-"""arjev CLI: init + digest (the verb surface grows per slice)."""
+"""The arjev CLI: the argparse tree for every verb, and its dispatch."""
 
 from __future__ import annotations
 
@@ -100,6 +100,13 @@ def main(argv: list[str] | None = None) -> int:
         help="A/B the state arms live (Jev calls + candidate fetches; labeled candidates only)",
     )
     p_cal.add_argument("--json", action="store_true", help="machine-readable report")
+
+    p_daily = sub.add_parser(
+        "daily", help="the whole day for a timer: digest (retried), ingest, slack sync; Sundays add review"
+    )
+    p_daily.add_argument("--config", default=None)
+    p_daily.add_argument("--retries", type=int, default=5, help="digest attempts on weekdays (default: 5)")
+    p_daily.add_argument("--backoff-min", type=float, default=10, help="minutes between attempts (default: 10)")
 
     p_review = sub.add_parser(
         "review", help="the week-in-review: the buried, your people, the divergences, the receipts (read-only)"
@@ -323,6 +330,13 @@ def main(argv: list[str] | None = None) -> int:
 
         print(json.dumps(dataclasses.asdict(report), indent=2, sort_keys=True) if args.json else report.render())
         return 0
+    if args.cmd == "daily":
+        from .config import load_config
+        from .daily import run_daily
+
+        config_arg = ["--config", args.config] if args.config else []
+        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        return run_daily(main, cfg, config_arg=config_arg, retries=args.retries, backoff_s=args.backoff_min * 60)
     if args.cmd == "review":
         from arjev.config import load_config
         from arjev.review import post_review, review

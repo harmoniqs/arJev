@@ -94,6 +94,31 @@ def test_http_transport_sends_form_encoded_params():
     assert request.headers["authorization"] == "Bearer xoxb-test"
 
 
+def test_slack_token_reads_a_file_like_the_jev_key(monkeypatch, tmp_path):
+    # ARJEV_SLACK_TOKEN_FILE mirrors ARJEV_JEV_KEY_FILE: the token stays in a
+    # mode-600 file, never in a process environment or a wrapper script
+    from arjev.digest import slack_token
+
+    f = tmp_path / "slack-token"
+    f.write_text("xoxb-from-file\n")
+    monkeypatch.delenv("ARJEV_SLACK_TOKEN", raising=False)
+    monkeypatch.setenv("ARJEV_SLACK_TOKEN_FILE", str(f))
+    assert slack_token() == "xoxb-from-file"
+    monkeypatch.setenv("ARJEV_SLACK_TOKEN", "xoxb-from-env")
+    assert slack_token() == "xoxb-from-env"  # the env var wins when both are set
+
+
+def test_missing_slack_token_names_both_options(monkeypatch):
+    import pytest
+
+    from arjev.digest import slack_token
+
+    monkeypatch.delenv("ARJEV_SLACK_TOKEN", raising=False)
+    monkeypatch.delenv("ARJEV_SLACK_TOKEN_FILE", raising=False)
+    with pytest.raises(SystemExit, match="ARJEV_SLACK_TOKEN_FILE"):
+        slack_token()
+
+
 # ── keepers enforcement ───────────────────────────────────────────────────────────
 
 def test_unauthorized_reactions_label_nothing():

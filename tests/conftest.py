@@ -36,7 +36,8 @@ def _no_live_state_or_credentials(monkeypatch, tmp_path):
     into the LIVE journal (found 2026-10-02: run 20261002T160824Z). Both are
     autouse now — no test can inherit the machine, period."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    for var in ("ARJEV_JEV_KEY", "ARJEV_JEV_KEY_FILE", "ARJEV_JEV_DISABLED", "ARJEV_SLACK_TOKEN"):
+    for var in ("ARJEV_JEV_KEY", "ARJEV_JEV_KEY_FILE", "ARJEV_JEV_DISABLED", "ARJEV_SLACK_TOKEN",
+                "ARJEV_SLACK_TOKEN_FILE"):
         monkeypatch.delenv(var, raising=False)
 
 

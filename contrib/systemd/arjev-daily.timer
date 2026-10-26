@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the arJev daily digest every day at 13:00 UTC
+
+[Timer]
+# arXiv's new listings are out by 13:00 UTC on weekdays
+OnCalendar=*-*-* 13:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
