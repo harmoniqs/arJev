@@ -141,13 +141,12 @@ def apply_jev_first(
             _time.sleep(pace_s)
         if answer.ok:
             mode_primary = "jev"
-            mass = answer.distribution.get("must-read", 0.0) + answer.distribution.get("worth-reading", 0.0)
-            evaluated.append(Pick(item.identity.id, item.title, s.score, s.terms, mass, None, None,
-                                  source=item.source))
+            evaluated.append(Pick(item.identity.id, item.title, s.score, s.terms, _relevance_mass(answer), None,
+                                  None, source=item.source))
         else:
             fail_reasons[item.identity] = answer.fail_reason
-            evaluated.append(Pick(item.identity.id, item.title, s.score, s.terms, 0.0, None, answer.fail_reason,
-                                  source=item.source))
+            evaluated.append(Pick(item.identity.id, item.title, s.score, s.terms, _relevance_mass(answer), None,
+                                  answer.fail_reason, source=item.source))
     evaluated.sort(key=lambda p: (-p.jev_primary, -p.lexical_score, p.identity))
     if policy.candidate_conclusions and enrich is not None and evaluated:
         _rescore_finalists(evaluated, scored_by_id, client, profile, run_id, receipts, policy, enrich,
@@ -199,6 +198,17 @@ def _rescore_finalists(evaluated, scored_by_id, client, profile, run_id, receipt
         fail_reasons.pop(p.identity, None)
 
 
+def _relevance_mass(answer) -> float:
+    """must-read + worth-reading probability — the pick-ranking quantity. A
+    low-confidence answer still carries its full distribution, and that mass
+    already encodes the uncertainty, so it ranks on it; discarding it to 0.0 let a
+    confident *irrelevant* (mass ~0.05) outrank an unsure *must-read* (found live
+    2026-10-22..26). Outages and overflows carry no distribution and score 0.0."""
+    if not answer.ok and answer.fail_reason != "low-confidence":
+        return 0.0
+    return answer.distribution.get("must-read", 0.0) + answer.distribution.get("worth-reading", 0.0)
+
+
 def _lexical_pool(identity: Identity, scored_by_id: dict) -> str:
     s = scored_by_id.get(identity)
     if s is None:
@@ -247,12 +257,11 @@ def apply_jev(rank: RankResult, client: JevClient, profile, run_id: str, receipt
             continue
         if answer.ok:
             mode_primary = "jev"
-            mass = answer.distribution.get("must-read", 0.0) + answer.distribution.get("worth-reading", 0.0)
-            evaluated.append(Pick(s.item.identity.id, s.item.title, s.score, s.terms, mass, None, None,
-                                  source=s.item.source))
+            evaluated.append(Pick(s.item.identity.id, s.item.title, s.score, s.terms, _relevance_mass(answer),
+                                  None, None, source=s.item.source))
         else:
-            evaluated.append(Pick(s.item.identity.id, s.item.title, s.score, s.terms, 0.0, None,
-                                  answer.fail_reason, source=s.item.source))
+            evaluated.append(Pick(s.item.identity.id, s.item.title, s.score, s.terms, _relevance_mass(answer),
+                                  None, answer.fail_reason, source=s.item.source))
             fail_reasons[s.item.identity] = answer.fail_reason
 
     for pool_name, source in (("near-miss", rank.pools.near_miss), ("probe", rank.pools.probe)):

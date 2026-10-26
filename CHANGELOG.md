@@ -3,6 +3,19 @@
 All notable changes, newest first. Dates are release tags (UTC). Install a
 specific release with `uv tool install git+https://github.com/harmoniqs/arJev@vX.Y.Z`.
 
+## v0.6.1 — 2026-10-26
+
+- **Fixed: relevant papers lost to a confidence gate, junk posted instead.**
+  A Jev answer whose single top label fell below `min_confidence` (0.6) was
+  scored as zero relevance. A paper Jev judged 92% relevant but split between
+  *must-read* and *worth-reading* failed the gate, while papers it called
+  *irrelevant* with 61% confidence passed and kept a small nonzero score — so
+  from Oct 22, with the wider feed union, they filled the top 5. Low-confidence
+  answers now rank on their must-read + worth-reading probability, which
+  already encodes the uncertainty; they are still recorded as `low-confidence`
+  in the journal. Replaying the Oct 22–26 receipts, every day posts five
+  relevant papers.
+
 ## v0.6.0 — 2026-10-26
 
 **One command for the whole day, and a setup kit in the repo.**
