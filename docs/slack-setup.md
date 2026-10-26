@@ -59,6 +59,7 @@ export ARJEV_JEV_KEY="…"            # optional — without it the digest runs 
 
 ```bash
 arjev digest --feed quant-ph --post slack     # the daily digest (cron/launchd)
+arjev digest --feed quant-ph --post slack,vault  # same run, also the dated vault note
 arjev slack sync                             # after: harvest reactions → labels + stubs
 ```
 
