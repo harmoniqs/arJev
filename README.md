@@ -1,3 +1,12 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/banner-dark.svg">
+    <img alt="arJev" src="docs/brand/banner-light.svg" width="520">
+  </picture>
+</p>
+
+<p align="center"><em>Your daily arXiv, ranked against your vault.</em></p>
+
 # arJev
 
 A daily arXiv digest engine that ranks against your **living Obsidian vault** — so the picks get better every week you use it, because *you* are the training data.
