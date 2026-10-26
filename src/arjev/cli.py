@@ -24,7 +24,13 @@ def main(argv: list[str] | None = None) -> int:
     p_digest = sub.add_parser("digest", help="run the daily digest")
     p_digest.add_argument("--feed", default=None, help="arXiv RSS feed name (default: config feeds[0])")
     p_digest.add_argument("--feed-file", default=None, help="RSS fixture path (overrides --feed)")
-    p_digest.add_argument("--post", default="stdout", choices=["stdout", "vault", "slack"], help="output sink")
+    p_digest.add_argument(
+        "--post",
+        default="stdout",
+        type=_post_sinks,
+        help="output sink(s): stdout | vault | slack, or a comma list of durable sinks (e.g. slack,vault) — "
+        "one ranking, every sink; the vault note is written first",
+    )
     p_digest.add_argument("--config", default=None, help="config path")
     p_digest.add_argument("--top", type=int, default=None)
     p_digest.add_argument("--screen", type=int, default=None)
@@ -123,7 +129,18 @@ def main(argv: list[str] | None = None) -> int:
             value = getattr(args, attr)
             if value is not None:
                 setattr(cfg, attr, value)
-        result = run_digest(cfg, feed=args.feed, feed_file=args.feed_file, post=args.post, enrich=args.enrich)
+        from .digest import PostFailure
+
+        try:
+            result = run_digest(cfg, feed=args.feed, feed_file=args.feed_file, post=args.post, enrich=args.enrich)
+        except PostFailure as exc:
+            # a multi-sink partial failure: the run happened (the landed sinks are
+            # durable and journaled) — print it, name the failed sink(s), exit 1
+            result = exc.result
+            print(result.markdown)
+            print(f"\n[fingerprint {result.fingerprint} · {result.mode} · {result.picks} picks]")
+            print(f"{exc}", file=sys.stderr)
+            return 1
         print(result.markdown)
         print(f"\n[fingerprint {result.fingerprint} · {result.mode} · {result.picks} picks]")
         return 0
@@ -365,6 +382,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     parser.error(f"unknown command {args.cmd!r}")
     return 2
+
+
+def _post_sinks(value: str) -> tuple[str, ...]:
+    """argparse type for digest --post: validation lives in digest.parse_post."""
+    from .digest import parse_post
+
+    try:
+        return parse_post(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _resolve_channel(cfg, name: str) -> str:

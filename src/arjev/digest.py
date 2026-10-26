@@ -1,5 +1,5 @@
 """Digest orchestration: fold → profile → feed → score → rank → Jev middle layer →
-post (stdout | vault | slack) + journal. Deterministic on identical inputs (acceptance:
+post (stdout | any of vault, slack — one ranking, many sinks) + journal. Deterministic on identical inputs (acceptance:
 fingerprint mismatches == 0). Fail-open: no key / outage / low confidence → the lexical
 ranking, with the mode flag and per-candidate journal saying exactly what ran."""
 
@@ -45,6 +45,44 @@ class DigestResult:
 
 ENRICH_CAP = 4096
 
+SINKS = ("stdout", "vault", "slack")
+# durable sinks run in this fixed order whatever order the caller lists them:
+# the vault note is the durable record, so it lands before the Slack post can fail
+DURABLE_ORDER = ("vault", "slack")
+
+
+def parse_post(value) -> tuple[str, ...]:
+    """`--post` value → the run's sinks: a single sink or a comma list of durable
+    ones (issue #106). Unknown or empty tokens are rejected; stdout is the
+    no-durable-sink preview, so combining it with vault/slack is a contradiction
+    (and redundant — the CLI always prints the digest) and is rejected too."""
+    tokens = [t.strip() for t in value.split(",")] if isinstance(value, str) else [str(t).strip() for t in value]
+    if not tokens or any(not t for t in tokens):
+        raise ValueError(f"--post {value!r}: empty sink token (choose from {', '.join(SINKS)})")
+    unknown = [t for t in tokens if t not in SINKS]
+    if unknown:
+        raise ValueError(f"--post: unknown sink {', '.join(map(repr, unknown))} (choose from {', '.join(SINKS)})")
+    chosen = set(tokens)
+    if "stdout" in chosen:
+        if len(chosen) > 1:
+            raise ValueError("--post: stdout is the preview sink and cannot combine with vault/slack "
+                             "(the digest always prints; list only the durable sinks)")
+        return ("stdout",)
+    return tuple(s for s in DURABLE_ORDER if s in chosen)
+
+
+class PostFailure(RuntimeError):
+    """A multi-sink run where at least one sink failed. The run itself happened:
+    the sinks that landed consumed the posted ids and the journal is written
+    (when anything landed); `result` carries the digest, `failed` maps each
+    failed sink to its error. A single-sink failure raises the sink's own error."""
+
+    def __init__(self, failed: dict[str, BaseException], result: DigestResult):
+        self.failed = failed
+        self.result = result
+        detail = "; ".join(f"{sink}: {exc}" for sink, exc in failed.items())
+        super().__init__(f"digest post failed for {', '.join(failed)} — {detail}")
+
 
 def _enrich(markdown: str, picks: list[Pick], mode: str, command: str) -> str:
     """The enrichment seam (docs/amicode-integration.md): the command receives the
@@ -81,7 +119,7 @@ def run_digest(
     cfg: Config,
     feed: str | None = None,
     feed_file: str | None = None,
-    post: str = "stdout",
+    post: str | tuple[str, ...] = "stdout",
     today: date | None = None,
     seed: str | None = None,
     jev_client: JevClient | None = None,
@@ -90,6 +128,7 @@ def run_digest(
     pdf_fetcher=None,
 ) -> DigestResult:
     today = today or date.today()
+    sinks = parse_post(post)
     # a missing feed list is a config error, never a silent default-category digest
     # (fail-open is for Jev seams only — issue #53)
     if not (feed or feed_file or cfg.feeds):
@@ -97,6 +136,15 @@ def run_digest(
             'feeds not configured — set feeds = ["<arXiv category>", …] in arjev.toml; '
             "arJev ranks only what you configure and never defaults to a category"
         )
+    # slack config is checked BEFORE ranking: a config error must not burn a
+    # full Jev pass, and must never leave a half-posted multi-sink run
+    sc = None
+    if "slack" in sinks:
+        if not cfg.slack_channel:
+            raise SystemExit("slack_channel not configured (docs/slack-setup.md)")
+        from .slack import SlackClient
+
+        sc = slack_client or SlackClient(token=slack_token())
     # the seed fallback names the config slot, never a category — the configured
     # feeds live in the journal's feed field, not in the seed (issue #53)
     seed = seed or f"{feed or feed_file or 'feeds'}:{today.isoformat()}"
@@ -201,12 +249,15 @@ def run_digest(
             for p in picks if p.identity.id in items_by_id
         }
 
-    if post == "slack":
-        if not cfg.slack_channel:
-            raise SystemExit("slack_channel not configured (docs/slack-setup.md)")
-        from .slack import SlackClient, render_pick_message
+    def post_vault():
+        digest_dir = Path(cfg.digest_dir).expanduser() if cfg.digest_dir else cfg.expanded_roots[0] / "digests"
+        note = render_vault_note(picks, feed_name, total=len(items), today=today, mode=mode,
+                                  skipped_corpus=len(ranked.skipped_corpus), who_by_id=who_by_id)
+        write_vault_note(note, digest_dir, today)
 
-        sc = slack_client or SlackClient(token=slack_token())
+    def post_slack():
+        from .slack import render_pick_message
+
         record.slack_channel = cfg.slack_channel
         roster_hits = sum(1 for p in picks if who_by_id.get(p.identity.id) and who_by_id[p.identity.id].hits)
         roster_note = f" · {roster_hits} roster hits" if roster_hits else ""
@@ -227,26 +278,36 @@ def run_digest(
                     c.slack_ts = ts
                     break
 
-    if post == "vault":
-        digest_dir = Path(cfg.digest_dir).expanduser() if cfg.digest_dir else cfg.expanded_roots[0] / "digests"
-        note = render_vault_note(picks, feed_name, total=len(items), today=today, mode=mode,
-                                  skipped_corpus=len(ranked.skipped_corpus), who_by_id=who_by_id)
-        write_vault_note(note, digest_dir, today)
+    # one ranking, many sinks (issue #106): each durable sink is isolated — a
+    # Slack failure never costs the vault note, a vault failure never blocks Slack.
+    # A single sink keeps its historical contract: its own error propagates.
+    failed: dict[str, BaseException] = {}
+    durable = [sink for sink in sinks if sink != "stdout"]
+    for sink in durable:
+        try:
+            (post_vault if sink == "vault" else post_slack)()
+        except Exception as exc:
+            if len(durable) == 1:
+                raise
+            failed[sink] = exc
 
     # posted ids are consumed only by DURABLE posts — a stdout preview must not
     # mark picks as seen (the live integration run caught the opposite: a preview
-    # burned the day's picks and the real post would have shipped empty)
-    if post in ("slack", "vault"):
+    # burned the day's picks and the real post would have shipped empty). ONE
+    # append per run however many sinks landed; nothing landed → nothing consumed.
+    landed = [sink for sink in durable if sink not in failed]
+    if landed:
         state_file = state_dir() / "papers-digest-state.json"
         # posted ids persist the identity's id half (frozen state schema)
         PostedState.load(state_file).append([p.identity.id for p in picks])
-    write_journal(record)
+    if landed or not durable:
+        write_journal(record)
 
     markdown = render_mrkdwn(picks, feed_name, total=len(items), today=today, mode=mode,
                               skipped_corpus=len(ranked.skipped_corpus))
     if enrich and cfg.enrich_command:
         markdown = _enrich(markdown, picks, mode, cfg.enrich_command)
-    return DigestResult(
+    result = DigestResult(
         markdown=markdown,
         fingerprint=fingerprint_picks(picks),
         mode=mode,
@@ -254,3 +315,6 @@ def run_digest(
         run_id=run_id,
         journal_rows=len(candidates),
     )
+    if failed:
+        raise PostFailure(failed, result) from next(iter(failed.values()))
+    return result
