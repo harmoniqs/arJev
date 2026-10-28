@@ -1,6 +1,11 @@
 """Config: arjev.toml (tomllib reads; the static template writer lives in init.py).
 The default field mapping is the Harmoniqs paper-note schema; every mapped name is
-remappable so any Obsidian/Zotero vault works (spec: Paper-note schema v2)."""
+remappable so any Obsidian/Zotero vault works (spec: Paper-note schema v2).
+
+Per-root field mapping (harmoniqs/arJev#97): a [[vault.root_configs]] table array
+lets each root carry its own field slots and an optional rating value map. A root
+without an entry inherits the global [vault.fields] mapping unchanged.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +24,20 @@ DEFAULT_FIELDS = {
 }
 
 
+@dataclass
+class RootConfig:
+    """Per-root field mapping and optional rating value map (issue #97).
+
+    `fields` mirrors the global mapping slots (identity, read_date, rating, why,
+    tags, status); absent slots inherit from the global mapping at fold time.
+    `rating_values` maps source enum values to the canonical RATING_ENUM set
+    (e.g. {"high": "core", "medium": "useful", "low": "marginal"}).
+    """
+
+    fields: dict[str, Any] = field(default_factory=dict)
+    rating_values: dict[str, str] = field(default_factory=dict)
+
+
 def _expand(p: str) -> str:
 
     return str(Path(p).expanduser()) if p.startswith("~") else p
@@ -30,6 +49,9 @@ class Config:
     include: str = "**/*.md"
     discriminator_type: str = "paper"
     fields: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_FIELDS))
+    # Per-root field mapping (issue #97): keyed by the expanded root path string.
+    # A root absent from this dict inherits the global `fields` mapping unchanged.
+    root_configs: dict[str, RootConfig] = field(default_factory=dict)
     half_life_days: float = 180.0
     # field-neutral: no category is ever defaulted — a missing feeds list is a
     # config error the digest names plainly (issue #53)
@@ -109,6 +131,21 @@ def load_config(path: Path | None = None) -> Config:
     cfg.candidate_pace_s = float(jev.get("candidate_pace_s", cfg.candidate_pace_s))
     cfg.directives_path = raw.get("directives_path") or vault.get("directives_path")
     cfg.enrich_command = raw.get("enrich_command") or vault.get("enrich_command")
+    # Per-root field mapping (issue #97): [[vault.root_configs]] array of tables.
+    # Each entry must carry a `path` key; `fields` and `rating_values` are optional.
+    for rc_raw in vault.get("root_configs", []):
+        rc_path = rc_raw.get("path")
+        if not rc_path:
+            continue
+        rc_path = _expand(str(rc_path))
+        rc_fields_raw = rc_raw.get("fields", {})
+        rc_fields: dict[str, Any] = {}
+        if rc_fields_raw:
+            rc_fields = dict(rc_fields_raw)
+            if "identity" in rc_fields and isinstance(rc_fields["identity"], str):
+                rc_fields["identity"] = [rc_fields["identity"]]
+        rc_rating_values = {str(k): str(v) for k, v in rc_raw.get("rating_values", {}).items()}
+        cfg.root_configs[rc_path] = RootConfig(fields=rc_fields, rating_values=rc_rating_values)
     slack = raw.get("slack", {})
     cfg.slack_channel = slack.get("channel")
     cfg.slack_keepers = list(slack.get("keepers", []))
