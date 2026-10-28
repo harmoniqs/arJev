@@ -45,7 +45,7 @@ def run_inspect(cfg: Config, today: date | None = None) -> InspectReport:
     profile = build_profile(fold, cfg, today, directives=directives)
     report = InspectReport(
         lines=_checklist_lines(cfg)
-        + _fold_lines(fold, profile, len(staged_worklist(fold)), directives)
+        + _fold_lines(fold, profile, len(staged_worklist(fold)), directives, cfg=cfg)
     )
     if not cfg.feeds:
         report.blocked.append(BLOCK_NO_FEEDS)
@@ -88,9 +88,17 @@ def _checklist_lines(cfg: Config) -> list[str]:
     ]
 
 
-def _fold_lines(fold: FoldResult, profile: Profile, staged: int, directives: Directives) -> list[str]:
+def _fold_lines(
+    fold: FoldResult, profile: Profile, staged: int, directives: Directives, cfg: Config | None = None
+) -> list[str]:
     """The fold's view: the scan funnel, the profile it yields, and the fold's
-    warnings verbatim — `warning: <text>`, one per line, never reworded."""
+    warnings verbatim — `warning: <text>`, one per line, never reworded.
+
+    When the config carries per-root field mappings (issue #97) one additional
+    line per configured root_config is emitted:
+      fold root-mapping: <path> (custom: rating=<field>[, rating_values=<n>])
+    Roots that inherit the global mapping produce no root-mapping line.
+    """
     lines = [
         f"fold scanned: {fold.scanned}",
         f"fold type-matched: {fold.type_matched}",
@@ -103,5 +111,17 @@ def _fold_lines(fold: FoldResult, profile: Profile, staged: int, directives: Dir
         lines.append(f"fold directives: loaded ({len(directives.all_terms())} terms)")
     else:
         lines.append("fold directives: none")
+    # Per-root mapping state (issue #97): one line per root with a custom mapping.
+    if cfg is not None:
+        root_configs = getattr(cfg, "root_configs", {}) or {}
+        for root_path, rc in sorted(root_configs.items()):
+            parts = []
+            rf = rc.fields or {}
+            if rf.get("rating"):
+                parts.append(f"rating={rf['rating']}")
+            if rc.rating_values:
+                parts.append(f"rating_values={len(rc.rating_values)}")
+            detail = ", ".join(parts) if parts else "custom"
+            lines.append(f"fold root-mapping: {root_path} ({detail})")
     lines.append(f"fold warnings: {len(fold.warnings) if fold.warnings else 'none'}")
     return lines + [f"warning: {w}" for w in fold.warnings]
