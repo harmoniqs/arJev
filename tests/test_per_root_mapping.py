@@ -307,7 +307,6 @@ def test_single_root_no_new_slots_fold_identical(tmp_path):
 def test_single_root_ranking_parity(tmp_path):
     """Ranking scores are bit-identical for a single-root config with no new slots."""
     from arjev.feed import parse_arxiv_rss
-    from arjev.rank import classify_pools, rank
     from arjev.score import score_item
 
     rss = (FIXTURES / "rss-quant-ph.xml").read_text()
