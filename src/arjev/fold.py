@@ -14,6 +14,11 @@ Spec contracts honored here:
 - wikilink signal: a paper note's term weights scale by (1 + 0.5 × min(3, inlinks))
   where an inlink is a wikilink from a NON-PAPER note (no mapped identity) (#16).
 - "blank" means ABSENT: a rating outside the closed enum is dropped with a warning.
+- per-root field mapping (issue #97): each root may carry its own field slots via
+  cfg.root_configs; a root without an entry inherits the global cfg.fields mapping.
+  A rating_values map in the RootConfig remaps source enum values to canonical ones.
+  A sentence-valued rating/why field (when rating and why map to the same frontmatter
+  key) is consumed as the why-line instead of triggering an 'outside enum' warning.
 """
 
 from __future__ import annotations
@@ -117,16 +122,119 @@ def _date_from_mtime(path: Path) -> date | None:
         return None
 
 
+def _effective_fields(cfg, root: Path) -> dict:
+    """Resolve the effective field mapping for a root (issue #97).
+    The root's own field overrides take precedence over the global mapping;
+    a root with no RootConfig entry inherits the global mapping unchanged."""
+    root_configs = getattr(cfg, "root_configs", {}) or {}
+    rc = root_configs.get(str(root))
+    if rc is None or not rc.fields:
+        return cfg.fields
+    # Merge: start from global, override with per-root entries.
+    merged = dict(cfg.fields)
+    merged.update(rc.fields)
+    if isinstance(merged.get("identity"), str):
+        merged["identity"] = [merged["identity"]]
+    return merged
+
+
+def _rating_values(cfg, root: Path) -> dict[str, str]:
+    """Rating value map for this root (issue #97), or empty dict for no remapping."""
+    root_configs = getattr(cfg, "root_configs", {}) or {}
+    rc = root_configs.get(str(root))
+    if rc is None:
+        return {}
+    return rc.rating_values or {}
+
+
 def _build_paper(
-    fm: dict, body: str, path: Path, identity: str, arxiv: str | None, cfg, warnings: list[str]
+    fm: dict,
+    body: str,
+    path: Path,
+    identity: str,
+    arxiv: str | None,
+    cfg,
+    warnings: list[str],
+    *,
+    fields: dict | None = None,
+    rating_values: dict[str, str] | None = None,
 ) -> PaperNote:
-    fields = cfg.fields
-    rating = fm.get(fields["rating"])
-    rating = rating.strip() if isinstance(rating, str) else None
-    why = fm.get(fields["why"])
-    why = why.strip() if isinstance(why, str) and why.strip() else None
-    # back-compat: the literal legacy `relevance` field (only when not itself remapped)
-    if fields["rating"] != "relevance" and fields["why"] != "relevance":
+    """Build a PaperNote from parsed frontmatter.
+
+    `fields` and `rating_values` are the effective per-root overrides (issue #97);
+    when absent they fall back to cfg.fields with no value remapping (back-compat).
+    """
+    if fields is None:
+        fields = cfg.fields
+    if rating_values is None:
+        rating_values = {}
+
+    rating_field = fields["rating"]
+    why_field = fields["why"]
+    same_field = (rating_field == why_field)  # e.g. both map to "relevance"
+
+    raw_rating_val = fm.get(rating_field)
+    raw_rating = raw_rating_val.strip() if isinstance(raw_rating_val, str) else None
+
+    raw_why_val = fm.get(why_field)
+    raw_why = raw_why_val.strip() if isinstance(raw_why_val, str) and raw_why_val.strip() else None
+
+    rating: str | None = None
+    why: str | None = None
+
+    if same_field:
+        # Rating and why come from the same frontmatter key.
+        # Precedence: canonical enum > rating_values remap > sentence → why.
+        # An empty string is invalid (blank = absent), not a sentence.
+        val = raw_rating  # they point to the same key
+        if val is not None:
+            if not val:
+                # empty string: outside enum, warn and drop
+                warnings.append(f"{path.name}: rating '' outside enum — dropped")
+            elif val in RATING_ENUM:
+                rating = val
+            elif val in rating_values:
+                remapped = rating_values[val]
+                if remapped in RATING_ENUM:
+                    rating = remapped
+                else:
+                    # misconfigured value map — warn and drop
+                    warnings.append(
+                        f"{path.name}: rating_values maps {val!r} → {remapped!r} which is outside enum — dropped"
+                    )
+            else:
+                # sentence-valued: treat as why-line (no 'outside enum' warning)
+                why = val
+    else:
+        # Separate rating and why fields.
+        if raw_rating is not None:
+            if not raw_rating:
+                # empty string: outside enum, warn and drop
+                warnings.append(f"{path.name}: rating '' outside enum — dropped")
+            elif raw_rating in RATING_ENUM:
+                rating = raw_rating
+            elif raw_rating in rating_values:
+                remapped = rating_values[raw_rating]
+                if remapped in RATING_ENUM:
+                    rating = remapped
+                else:
+                    warnings.append(
+                        f"{path.name}: rating_values maps {raw_rating!r} → {remapped!r} which is outside enum — dropped"
+                    )
+            else:
+                # sentence-valued rating field with separate why field: treat as why if why is absent
+                if raw_why is None:
+                    why = raw_rating
+                else:
+                    # Both are present and rating isn't an enum value — drop rating with warning
+                    warnings.append(f"{path.name}: rating {raw_rating!r} outside enum — dropped")
+
+        if raw_why is not None and why is None:
+            why = raw_why
+
+    # back-compat: the literal legacy `relevance` field (only when not itself remapped by the
+    # active fields — if rating or why already point to "relevance", the per-root mapping handles it)
+    if rating_field != "relevance" and why_field != "relevance":
         legacy = fm.get("relevance")
         if isinstance(legacy, str) and legacy.strip():
             legacy = legacy.strip()
@@ -135,10 +243,12 @@ def _build_paper(
             elif why is None:
                 why = legacy
             else:
-                warnings.append(f"{path.name}: prose `relevance` ignored — explicit `{fields['why']}` wins")
+                warnings.append(f"{path.name}: prose `relevance` ignored — explicit `{why_field}` wins")
+
     if rating is not None and rating not in RATING_ENUM:
         warnings.append(f"{path.name}: rating {rating!r} outside enum — dropped")
         rating = None
+
     read_date = _as_date(fm.get(fields["read_date"])) or _as_date(fm.get("date")) or _date_from_mtime(path)
     status = fm.get(fields["status"])
     status = status.strip().lower() if isinstance(status, str) else "distilled"
@@ -162,13 +272,17 @@ def _build_paper(
 
 
 def fold_roots(roots: list[Path], cfg) -> FoldResult:
-    """Fold every configured root into one result. Read-only; missing roots warn."""
+    """Fold every configured root into one result. Read-only; missing roots warn.
+    Each root uses its own effective field mapping (issue #97): a root without a
+    per-root entry in cfg.root_configs inherits the global cfg.fields unchanged."""
     result = FoldResult()
     nonpaper_bodies: list[str] = []
     for root in roots:
         if not root.is_dir():
             result.warnings.append(f"vault root missing: {root}")
             continue
+        root_fields = _effective_fields(cfg, root)
+        root_rating_values = _rating_values(cfg, root)
         for path in sorted(root.glob(cfg.include)):
             if not path.is_file() or path.suffix != ".md":
                 continue
@@ -181,11 +295,14 @@ def fold_roots(roots: list[Path], cfg) -> FoldResult:
             fm, body = fm_body
             if isinstance(fm.get("type"), str) and fm["type"].strip() == cfg.discriminator_type:
                 result.type_matched += 1
-            identity, arxiv = _identity(fm, cfg.fields)
+            identity, arxiv = _identity(fm, root_fields)
             if identity is None:
                 nonpaper_bodies.append(body)
                 continue
-            result.papers.append(_build_paper(fm, body, path, identity, arxiv, cfg, result.warnings))
+            result.papers.append(_build_paper(
+                fm, body, path, identity, arxiv, cfg, result.warnings,
+                fields=root_fields, rating_values=root_rating_values,
+            ))
     _apply_wikilink_graph(result, nonpaper_bodies)
     seen: set[str] = set()
     deduped: list[PaperNote] = []
