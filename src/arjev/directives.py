@@ -43,6 +43,63 @@ def split_group(entry: str) -> tuple[str, str | None]:
     return entry.strip(), None
 
 
+def load_people_cards(cards_dir: Path) -> list[str]:
+    """Read every .md file in cards_dir and return roster entries.
+
+    Each card's 'name' and 'organization' frontmatter fields are read:
+    - card with a real organization → 'Name — Org' (grouped entry)
+    - card with organization TBD, empty, or absent → bare 'Name' entry
+    - card without a 'name' field → skipped
+
+    Returns an empty list when the directory is missing or unreadable
+    (fail-open: ADR invariant #5 — external seams fail open)."""
+    if not cards_dir.is_dir():
+        return []
+    entries: list[str] = []
+    for card_path in sorted(cards_dir.glob("*.md")):
+        if not card_path.is_file():
+            continue
+        try:
+            text = card_path.read_text(errors="replace")
+        except OSError:
+            continue
+        fm: dict = {}
+        if text.startswith("---\n"):
+            end = text.find("\n---\n", 4)
+            if end != -1:
+                try:
+                    fm = yaml.safe_load(text[4:end]) or {}
+                except yaml.YAMLError:
+                    fm = {}
+        if not isinstance(fm, dict):
+            continue
+        name = fm.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue  # no name — skip
+        name = name.strip()
+        org = fm.get("organization")
+        org_str = org.strip() if isinstance(org, str) else ""
+        if org_str and org_str.upper() != "TBD":
+            entries.append(f"{name} — {org_str}")
+        else:
+            entries.append(name)
+    return entries
+
+
+def _merge_authors(list_entries: list[str], card_entries: list[str]) -> list[str]:
+    """Merge two roster entry lists; an entry whose bare name already appears
+    in the merged result is dropped (deduplication by bare name, issue #98)."""
+    merged: list[str] = []
+    seen_names: set[str] = set()
+    for entry in list_entries + card_entries:
+        bare = split_group(entry)[0].lower()
+        if bare in seen_names:
+            continue
+        seen_names.add(bare)
+        merged.append(entry)
+    return merged
+
+
 def load_directives(cfg) -> Directives:
     """The directives note: explicit path, else arjev-directives.md at the first
     root that has one. Read-only; absent degrades to empty."""
@@ -53,11 +110,11 @@ def load_directives(cfg) -> Directives:
         [root / "arjev-directives.md" for root in cfg.expanded_roots]
     for path in candidates:
         if path.is_file():
-            return parse_directives(path.read_text(errors="replace"))
+            return parse_directives(path.read_text(errors="replace"), base_path=path.parent)
     return Directives()
 
 
-def parse_directives(text: str) -> Directives:
+def parse_directives(text: str, base_path: Path | None = None) -> Directives:
     body = text
     fm: dict = {}
     if text.startswith("---\n"):
@@ -70,13 +127,23 @@ def parse_directives(text: str) -> Directives:
             body = text[end + 5:]
     if not isinstance(fm, dict):
         fm = {}
+    if fm.get("type") not in (None, "directives"):
+        return Directives()  # an unrelated note at the path — not ours, ignore it
+    list_authors = [str(x) for x in (fm.get("authors") or [])]
+    # issue #98: people-card directory merges into the roster
+    card_authors: list[str] = []
+    raw_cards_dir = fm.get("people_cards_dir")
+    if raw_cards_dir and isinstance(raw_cards_dir, str):
+        cards_path = Path(raw_cards_dir.strip())
+        if not cards_path.is_absolute() and base_path is not None:
+            cards_path = base_path / cards_path
+        card_authors = load_people_cards(cards_path)
+    merged_authors = _merge_authors(list_authors, card_authors)
     directives = Directives(
         body=body.strip(),
         labs=[str(x) for x in (fm.get("labs") or [])],
-        authors=[str(x) for x in (fm.get("authors") or [])],
+        authors=merged_authors,
         companies=[str(x) for x in (fm.get("companies") or [])],
         topics=[str(x) for x in (fm.get("topics") or [])],
     )
-    if fm.get("type") not in (None, "directives"):
-        return Directives()  # an unrelated note at the path — not ours, ignore it
     return directives
