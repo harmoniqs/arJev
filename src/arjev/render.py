@@ -66,7 +66,7 @@ def render_vault_note(picks: list[Pick], feed_name: str, total: int, today: date
         f"type: digest\n"
         f"date: {today.isoformat()}\n"
         f"feed: {feed_name}\n"
-        f"mode: {mode}\n"
+        f"mode: {mode.removeprefix('mode: ')}\n"  # `mode` is the composite line, already prefixed
         "---\n"
     )
     lines = [f"# arXiv {feed_name} picks — {today.isoformat()}", "", f"`{mode}`", ""]
