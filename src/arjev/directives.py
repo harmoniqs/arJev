@@ -44,13 +44,18 @@ def split_group(entry: str) -> tuple[str, str | None]:
 
 
 def load_directives(cfg) -> Directives:
-    """The directives note: explicit path, else arjev-directives.md at the first
-    root that has one. Read-only; absent degrades to empty."""
+    """The directives note, by precedence: $ARJEV_DIRECTIVES_FILE, then the
+    config's `directives_path`, then arjev-directives.md at the first root that
+    has one. A missing `directives_path` falls through (`arjev inspect` reports
+    it). Read-only; absent degrades to empty."""
     import os
 
     override = os.environ.get("ARJEV_DIRECTIVES_FILE")
-    candidates = [Path(override).expanduser()] if override else \
-        [root / "arjev-directives.md" for root in cfg.expanded_roots]
+    if override:
+        candidates = [Path(override).expanduser()]
+    else:
+        configured = [Path(cfg.directives_path).expanduser()] if cfg.directives_path else []
+        candidates = configured + [root / "arjev-directives.md" for root in cfg.expanded_roots]
     for path in candidates:
         if path.is_file():
             return parse_directives(path.read_text(errors="replace"))

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 
 from .config import Config
 from .directives import Directives, load_directives
@@ -43,9 +44,14 @@ def run_inspect(cfg: Config, today: date | None = None) -> InspectReport:
     fold = fold_roots(cfg.expanded_roots, cfg)
     directives = load_directives(cfg)
     profile = build_profile(fold, cfg, today, directives=directives)
+    warnings = list(fold.warnings)
+    # a set-but-missing directives_path would otherwise fall through silently (issue #118);
+    # advisory like the fold's own warnings, never blocking
+    if cfg.directives_path and not Path(cfg.directives_path).expanduser().is_file():
+        warnings.append(f"directives_path does not exist: {cfg.directives_path}")
     report = InspectReport(
         lines=_checklist_lines(cfg)
-        + _fold_lines(fold, profile, len(staged_worklist(fold)), directives)
+        + _fold_lines(fold, profile, len(staged_worklist(fold)), directives, warnings)
     )
     if not cfg.feeds:
         report.blocked.append(BLOCK_NO_FEEDS)
@@ -88,7 +94,8 @@ def _checklist_lines(cfg: Config) -> list[str]:
     ]
 
 
-def _fold_lines(fold: FoldResult, profile: Profile, staged: int, directives: Directives) -> list[str]:
+def _fold_lines(fold: FoldResult, profile: Profile, staged: int, directives: Directives,
+                warnings: list[str]) -> list[str]:
     """The fold's view: the scan funnel, the profile it yields, and the fold's
     warnings verbatim — `warning: <text>`, one per line, never reworded."""
     lines = [
@@ -103,5 +110,5 @@ def _fold_lines(fold: FoldResult, profile: Profile, staged: int, directives: Dir
         lines.append(f"fold directives: loaded ({len(directives.all_terms())} terms)")
     else:
         lines.append("fold directives: none")
-    lines.append(f"fold warnings: {len(fold.warnings) if fold.warnings else 'none'}")
-    return lines + [f"warning: {w}" for w in fold.warnings]
+    lines.append(f"fold warnings: {len(warnings) if warnings else 'none'}")
+    return lines + [f"warning: {w}" for w in warnings]
