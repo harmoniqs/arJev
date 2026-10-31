@@ -3,6 +3,14 @@
 All notable changes, newest first. Dates are release tags (UTC). Install a
 specific release with `uv tool install git+https://github.com/harmoniqs/arJev@vX.Y.Z`.
 
+## Unreleased
+
+- **Fixed: `directives_path` was parsed and shown but never read.** The
+  directives loader now honors it: `ARJEV_DIRECTIVES_FILE` first, then
+  `directives_path`, then `arjev-directives.md` at the first root. A
+  `directives_path` that does not exist is reported by `arjev inspect` as a
+  warning instead of falling through silently. With neither set, nothing changes.
+
 ## v0.6.1 — 2026-10-26
 
 - **Fixed: relevant papers lost to a confidence gate, junk posted instead.**

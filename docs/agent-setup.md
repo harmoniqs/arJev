@@ -177,7 +177,10 @@ explanation:
 - `probe_k` — synonym-probe pool size, the recall pass that feeds the ranking
   (default 20);
 - `directives_path` — their taste-directives note (optional; defaults to
-  `arjev-directives.md` at the first root);
+  `arjev-directives.md` at the first root). Precedence: the
+  `ARJEV_DIRECTIVES_FILE` environment variable, then `directives_path`, then
+  `arjev-directives.md` at the first root that has one. A `directives_path`
+  that does not exist is skipped and `arjev inspect` prints a warning for it;
 - `[vault.fields] identity` — frontmatter field(s) holding the paper id; the
   first present one wins (default `["arxiv", "doi"]` — bare-DOI vaults set
   `["doi"]`);
