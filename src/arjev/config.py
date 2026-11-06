@@ -25,6 +25,22 @@ def _expand(p: str) -> str:
 
 
 @dataclass
+class Lane:
+    """One personal lane (issue #121): a recipient and the roots and feeds that
+    rank for them. Nothing falls through from the shared config — a personal lane
+    never folds another researcher's vault, and a category is never defaulted."""
+
+    name: str
+    recipient: str | None = None  # the Slack member id the picks are DM'd to
+    roots: list[str] = field(default_factory=list)
+    feeds: list[str] = field(default_factory=list)
+    top: int | None = None
+    papers_dir: str | None = None
+    digest_dir: str | None = None
+    directives_path: str | None = None
+
+
+@dataclass
 class Config:
     roots: list[str] = field(default_factory=list)
     include: str = "**/*.md"
@@ -55,6 +71,9 @@ class Config:
     why_style: str = "terms"  # terms | opaque | none
     who_style: str = "authors"  # full | authors | none — issue #87; the PDF fetch stays opt-in
     emoji_map: dict[str, str] = field(default_factory=lambda: {"thumbsup": "keep", "eyes": "read-later", "x": "skip"})
+    lanes: dict[str, Lane] = field(default_factory=dict)  # [lanes.<name>] tables (issue #121)
+    lane: str | None = None  # set on a lane's derived config — the state scope it runs in
+    slack_recipient: str | None = None  # a lane's DM recipient (set on the derived config only)
 
     @property
     def expanded_roots(self) -> list[Path]:
@@ -116,4 +135,48 @@ def load_config(path: Path | None = None) -> Config:
     cfg.who_style = slack.get("who_style", cfg.who_style)
     if "emoji_map" in slack:
         cfg.emoji_map = dict(slack["emoji_map"])
+    cfg.lanes = {name: _parse_lane(name, table) for name, table in raw.get("lanes", {}).items()}
     return cfg
+
+
+def _parse_lane(name: str, table: dict[str, Any]) -> Lane:
+    from .lanes import validate_lane_name
+
+    validate_lane_name(name)
+    top = table.get("top")
+    return Lane(
+        name=name,
+        recipient=table.get("recipient"),
+        roots=[_expand(r) for r in table.get("roots", [])],
+        feeds=list(table.get("feeds", [])),
+        top=int(top) if top is not None else None,
+        papers_dir=table.get("papers_dir"),
+        digest_dir=table.get("digest_dir"),
+        directives_path=table.get("directives_path"),
+    )
+
+
+def lane_config(cfg: Config, name: str) -> Config:
+    """The lane's own Config: the shared one's ranking knobs and field mapping,
+    with the lane's roots, feeds and output dirs, the recipient's DM as the only
+    Slack target, and the recipient as the only keeper. The base is not mutated."""
+    import copy
+
+    lane = cfg.lanes.get(name)
+    if lane is None:
+        known = ", ".join(sorted(cfg.lanes)) or "none configured"
+        raise SystemExit(f"no lane {name!r} in the config (lanes: {known})")
+    derived = copy.deepcopy(cfg)
+    derived.lanes = {}
+    derived.lane = name
+    derived.roots = list(lane.roots)
+    derived.feeds = list(lane.feeds)
+    if lane.top is not None:
+        derived.top = lane.top
+    derived.papers_dir = lane.papers_dir
+    derived.digest_dir = lane.digest_dir
+    derived.directives_path = lane.directives_path
+    derived.slack_channel = None  # a lane never posts to the shared channel
+    derived.slack_recipient = lane.recipient
+    derived.slack_keepers = [lane.recipient] if lane.recipient else []
+    return derived

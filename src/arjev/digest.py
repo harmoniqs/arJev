@@ -135,6 +135,28 @@ def run_digest(
     enrich: bool = False,
     pdf_fetcher=None,
 ) -> DigestResult:
+    """One digest run. A lane's derived config (issue #121) runs inside its own
+    state scope: its journal, posted ids and receipts never touch the shared ones."""
+    from .lanes import lane_scope
+
+    with lane_scope(cfg.lane):
+        return _run_digest(cfg, feed=feed, feed_file=feed_file, post=post, today=today, seed=seed,
+                           jev_client=jev_client, slack_client=slack_client, enrich=enrich,
+                           pdf_fetcher=pdf_fetcher)
+
+
+def _run_digest(
+    cfg: Config,
+    feed: str | None = None,
+    feed_file: str | None = None,
+    post: str | tuple[str, ...] = "stdout",
+    today: date | None = None,
+    seed: str | None = None,
+    jev_client: JevClient | None = None,
+    slack_client=None,
+    enrich: bool = False,
+    pdf_fetcher=None,
+) -> DigestResult:
     today = today or date.today()
     sinks = parse_post(post)
     # a missing feed list is a config error, never a silent default-category digest
@@ -147,12 +169,17 @@ def run_digest(
     # slack config is checked BEFORE ranking: a config error must not burn a
     # full Jev pass, and must never leave a half-posted multi-sink run
     sc = None
+    slack_target = cfg.slack_channel
     if "slack" in sinks:
-        if not cfg.slack_channel:
+        if not (cfg.slack_channel or cfg.slack_recipient):
             raise SystemExit("slack_channel not configured (docs/slack-setup.md)")
         from .slack import SlackClient
 
         sc = slack_client or SlackClient(token=slack_token())
+        if cfg.slack_recipient:
+            # a lane delivers to its recipient's DM; a DM that cannot open fails
+            # here, before ranking, and nothing is posted or journaled
+            slack_target = sc.open_dm(cfg.slack_recipient)
     # the seed fallback names the config slot, never a category — the configured
     # feeds live in the journal's feed field, not in the seed (issue #53)
     seed = seed or f"{feed or feed_file or 'feeds'}:{today.isoformat()}"
@@ -266,20 +293,21 @@ def run_digest(
     def post_slack():
         from .slack import render_pick_message
 
-        record.slack_channel = cfg.slack_channel
+        record.slack_channel = slack_target
         roster_hits = sum(1 for p in picks if who_by_id.get(p.identity.id) and who_by_id[p.identity.id].hits)
         roster_note = f" · {roster_hits} roster hits" if roster_hits else ""
         # the digest header: one message that reads AS the digest (the channel
         # showed five bare picks could be mistaken for bot noise)
+        title = "arJev picks for you" if cfg.slack_recipient else "arJev daily digest"
         sc.post_message(
-            cfg.slack_channel,
-            f"*arJev daily digest — {today.isoformat()}* — {len(picks)} picks · {mode} · "
+            slack_target,
+            f"*{title} — {today.isoformat()}* — {len(picks)} picks · {mode} · "
             f"{len(items)} new items ranked against your vault{roster_note}",
         )
         for i, p in enumerate(picks):
             msg = render_pick_message(p, i + 1, len(picks), today, mode, cfg.why_style,
                                       who=who_by_id.get(p.identity.id))
-            ts = sc.post_message(cfg.slack_channel, msg.text)
+            ts = sc.post_message(slack_target, msg.text)
             for c in record.candidates:
                 # the journal row carries the identity's id half only (frozen schema)
                 if c.arxiv == p.identity.id:

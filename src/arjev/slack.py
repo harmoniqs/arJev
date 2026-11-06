@@ -1,5 +1,6 @@
 """The Slack surface: a dedicated bot app (scopes chat:write, reactions:read,
-channels:history — docs/slack-setup.md). Rate discipline: ≤ 1 request/s with 429
+channels:history; im:write + im:history for personal lanes —
+docs/slack-setup.md). Rate discipline: ≤ 1 request/s with 429
 backoff (obligation #18). Content boundary: feed-derived + matched terms (why_style-
 gated) + one probe confidence — never vault paths, note filenames, or why text
 (obligation #12). Keepers allowlist: unauthorized reactions label nothing (#10).
@@ -60,6 +61,11 @@ class SlackClient:
 
     def post_message(self, channel: str, text: str) -> str:
         return str(self._call("chat.postMessage", {"channel": channel, "text": text})["ts"])
+
+    def open_dm(self, user: str) -> str:
+        """The DM channel id for one member (issue #121) — conversations.open is
+        idempotent, so every run reopens rather than caching the id."""
+        return str(self._call("conversations.open", {"users": user})["channel"]["id"])
 
     def get_reactions(self, channel: str, ts: str) -> list[dict]:
         msg = self._call("reactions.get", {"channel": channel, "timestamp": ts, "full": True})

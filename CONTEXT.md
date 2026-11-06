@@ -33,6 +33,11 @@ before. No implementation detail lives here.
 - **finalist enrichment** — The candidate-half content arm: after the first
   scoring pass, the top finalists are re-scored with their fetched
   conclusions/outlook in the state; fail-open, cached, never in the library.
+- **lane** — A personal ranking context inside one config: a recipient, the
+  vault roots and arXiv feeds that rank for them, and their own journal,
+  posted ids, and labels. A lane's picks arrive as Slack DMs; only its
+  recipient's reactions label it, and it inherits no roots or feeds from the
+  shared digest.
 - **who-line** — The pick message's author-and-attribution line: authors as
   the feed reports them, affiliations as the paper's own PDF prints them,
   tracked-people matches highlighted. Never an inferred group — attribution

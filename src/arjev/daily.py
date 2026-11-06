@@ -9,6 +9,7 @@ deployment's shell glue:
    day: one attempt, no retries, no failure.
 2. ingest — papers people shared in the digest channel become vault notes.
 3. slack sync — reactions and thread replies become labels; keeps become notes.
+   Then each personal lane: its digest by DM (retried the same way) and its sync.
 4. Sundays — the calibration report (to the state dir) and the week-in-review.
 
 Steps 2–4 run only when a Slack token is available. A failed step is logged
@@ -47,19 +48,23 @@ def run_daily(
 
     weekend = now.isoweekday() in (6, 7)
     attempts = 1 if weekend else max(1, retries)
-    sinks = "slack,vault" if slack_posting else "vault"
-    for attempt in range(1, attempts + 1):
-        log(f"digest (attempt {attempt}/{attempts}, post {sinks})")
-        if _ok(runner, ["digest", "--post", sinks, *config_arg], log):
-            break
-        if attempt < attempts:
-            log(f"digest attempt {attempt} failed — retrying in {backoff_s / 60:g} min")
-            sleep(backoff_s)
-        elif weekend:
-            log("quiet weekend — arXiv publishes no new listings on Saturday or Sunday; no digest (not an outage)")
-        else:
-            log(f"digest FAILED after {attempts} attempts")
-            failed.append("digest")
+
+    def digest(argv: list[str], label: str) -> None:
+        for attempt in range(1, attempts + 1):
+            log(f"{label} (attempt {attempt}/{attempts}, post {argv[argv.index('--post') + 1]})")
+            if _ok(runner, [*argv, *config_arg], log):
+                return
+            if attempt < attempts:
+                log(f"{label} attempt {attempt} failed — retrying in {backoff_s / 60:g} min")
+                sleep(backoff_s)
+            elif weekend:
+                log(f"quiet weekend — arXiv publishes no new listings on Saturday or Sunday; no {label} "
+                    "(not an outage)")
+            else:
+                log(f"{label} FAILED after {attempts} attempts")
+                failed.append(label)
+
+    digest(["digest", "--post", "slack,vault" if slack_posting else "vault"], "digest")
 
     if slack_posting:
         log("ingest — papers shared in the digest channel")
@@ -70,6 +75,17 @@ def run_daily(
             failed.append("slack sync")
     else:
         log("slack steps skipped — no Slack token or no channel configured")
+
+    # personal lanes (issue #121): each lane's picks go to its recipient's DM,
+    # then its reactions sync — after the shared day, one lane never stops another
+    if cfg.lanes and slack:
+        for name in cfg.lanes:
+            digest(["digest", "--lane", name, "--post", "slack"], f"lane {name} digest")
+            log(f"lane {name} slack sync — DM reactions → the lane's labels")
+            if not _ok(runner, ["slack", "sync", "--lane", name, *config_arg], log):
+                failed.append(f"lane {name} slack sync")
+    elif cfg.lanes:
+        log("lanes skipped — personal lanes deliver by Slack DM and no Slack token is available")
 
     if now.isoweekday() == 7:
         log("calibrate — the weekly report")

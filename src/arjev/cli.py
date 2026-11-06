@@ -9,6 +9,8 @@ from pathlib import Path
 
 from . import __version__
 
+LANE_HELP = "run as a personal lane from [lanes.<name>]: its own vault, feeds, DM, and state"
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="arjev", description="arXiv digest ranked against your Obsidian vault")
@@ -36,10 +38,12 @@ def main(argv: list[str] | None = None) -> int:
     p_digest.add_argument("--screen", type=int, default=None)
     p_digest.add_argument("--probe-k", type=int, default=None)
     p_digest.add_argument("--enrich", action="store_true", help="run the enrich_command for prose (fail-open)")
+    p_digest.add_argument("--lane", default=None, help=LANE_HELP)
 
     p_keep = sub.add_parser("keep", help="record a keep: label row + staged vault stub")
     p_keep.add_argument("arxiv", help="arXiv id (normalization handles vN suffixes)")
     p_keep.add_argument("--config", default=None)
+    p_keep.add_argument("--lane", default=None, help=LANE_HELP)
 
     p_fetch = sub.add_parser("fetch", help="download the arXiv PDF into the library dir")
     p_fetch.add_argument("arxiv")
@@ -54,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_staged = sub.add_parser("staged", help="the prose worklist: kept notes awaiting a body (read-only)")
     p_staged.add_argument("--config", default=None)
+    p_staged.add_argument("--lane", default=None, help=LANE_HELP)
 
     p_inspect = sub.add_parser("inspect", help="verify the config: checklist state + the fold's view (read-only)")
     p_inspect.add_argument("--config", default=None)
@@ -67,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     p_slack_sub = p_slack.add_subparsers(dest="slack_cmd", required=True)
     p_slack_sync = p_slack_sub.add_parser("sync", help="harvest reactions/replies → labels; auto-scaffold keeps")
     p_slack_sync.add_argument("--config", default=None)
+    p_slack_sync.add_argument("--lane", default=None, help=LANE_HELP)
 
     p_ingest = sub.add_parser("ingest", help="seed the taste profile: BibTeX, a PDF folder, or a Slack channel")
     p_ingest.add_argument("--bibtex", default=None, help="path to a .bib export (Google Scholar / Zotero)")
@@ -116,6 +122,24 @@ def main(argv: list[str] | None = None) -> int:
     p_review.add_argument("--config", default=None)
 
     args = parser.parse_args(argv)
+    from .lanes import lane_scope
+
+    # a lane's every state path (journal, posted ids, ledger) lives in its own
+    # scope for the whole verb — issue #121
+    with lane_scope(getattr(args, "lane", None)):
+        return _dispatch(parser, args)
+
+
+def _load(args):
+    """The verb's config: the file's, or the named lane's derived one."""
+    from .config import lane_config, load_config
+
+    cfg = load_config(Path(args.config).expanduser() if args.config else None)
+    lane = getattr(args, "lane", None)
+    return lane_config(cfg, lane) if lane else cfg
+
+
+def _dispatch(parser, args) -> int:
     if args.cmd == "init":
         from .init import init_config
 
@@ -128,10 +152,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config written: {path}")
         return 0
     if args.cmd == "digest":
-        from .config import load_config
         from .digest import run_digest
 
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        cfg = _load(args)
         for attr in ("top", "screen", "probe_k"):
             value = getattr(args, attr)
             if value is not None:
@@ -154,12 +177,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "keep":
         from datetime import date
 
-        from arjev.config import load_config
         from arjev.keep import keep
         from arjev.ledger import LabelLedger
         from arjev.rerank import journal_path
 
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        cfg = _load(args)
         candidate = _candidate_from_journal(args.arxiv, journal_path())
         if candidate is None:
             print(f"no journaled candidate for {args.arxiv} — digest first", file=sys.stderr)
@@ -192,11 +214,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"failed: {', '.join(result['failed'][:10])}")
         return 0
     if args.cmd == "staged":
-        from arjev.config import load_config
         from arjev.fold import fold_roots, staged_worklist
         from arjev.ledger import LabelLedger
 
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        cfg = _load(args)
         fold = fold_roots(cfg.expanded_roots, cfg)
         kept_by = {r.arxiv_id: r.source for r in LabelLedger().rows() if r.label_type == "keep"}
         for line in staged_worklist(fold, kept_by):
@@ -354,33 +375,33 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "slack" and args.slack_cmd == "sync":
         from datetime import date
 
-        from arjev.config import load_config
         from arjev.digest import slack_token
         from arjev.keep import scaffold_note
         from arjev.ledger import LabelLedger, now_ts
         from arjev.rerank import journal_path
         from arjev.slack import SlackClient, harvest_labels
 
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
-        if not cfg.slack_channel:
+        cfg = _load(args)
+        if not (cfg.slack_channel or cfg.lane):
             print("slack_channel not configured (docs/slack-setup.md)", file=sys.stderr)
             return 1
-        journal = [json.loads(line) for line in journal_path().read_text().splitlines() if line.strip()]
-        posted = [
-            {"arxiv": c["arxiv"], "slack_ts": c["slack_ts"]}
-            for line in journal
-            if line.get("slack_channel") == cfg.slack_channel
-            for c in line.get("candidates", [])
-            if c.get("slack_ts")
-        ]
-        labels, _, _ = harvest_labels(
-            SlackClient(token=slack_token()),
-            cfg.slack_channel,
-            posted,
-            set(cfg.slack_keepers),
-            cfg.emoji_map,
-            now_ts(),
-        )
+        jp = journal_path()
+        journal = [json.loads(line) for line in jp.read_text().splitlines() if line.strip()] if jp.is_file() else []
+        # the shared sync reads the configured channel; a lane's journal is its
+        # own (scoped), so every channel it posted to is the recipient's DM
+        channels = [cfg.slack_channel] if not cfg.lane else \
+            list(dict.fromkeys(line["slack_channel"] for line in journal if line.get("slack_channel")))
+        client = SlackClient(token=slack_token()) if channels else None
+        labels = []
+        for channel in channels:
+            posted = [
+                {"arxiv": c["arxiv"], "slack_ts": c["slack_ts"]}
+                for line in journal
+                if line.get("slack_channel") == channel
+                for c in line.get("candidates", [])
+                if c.get("slack_ts")
+            ]
+            labels += harvest_labels(client, channel, posted, set(cfg.slack_keepers), cfg.emoji_map, now_ts())[0]
         ledger = LabelLedger()
         written = [label for label in labels if ledger.append(label)]
         scaffolded = 0

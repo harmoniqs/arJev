@@ -3,6 +3,20 @@
 All notable changes, newest first. Dates are release tags (UTC). Install a
 specific release with `uv tool install git+https://github.com/harmoniqs/arJev@vX.Y.Z`.
 
+## Unreleased
+
+- **Personal lanes: picks by DM, ranked against one person's vault** (#121).
+  A `[lanes.<name>]` table names a recipient, their vault roots, and their
+  arXiv feeds; `arjev digest --lane <name> --post slack` sends that day's
+  picks to the recipient as direct messages, and `arjev slack sync --lane
+  <name>` turns their DM reactions into labels for that lane only. A lane
+  keeps its own journal, posted ids, and label ledger, inherits no roots or
+  feeds from the shared digest, and `arjev daily` runs every lane after the
+  shared day. `arjev inspect` reports each lane and blocks one with no
+  recipient, roots, or feeds. `keep` and `staged` take `--lane` too.
+- The Slack app manifest gains `im:write` and `im:history` for lanes; an
+  existing app needs the two scopes added and a reinstall.
+
 ## v0.6.1 — 2026-10-26
 
 - **Fixed: relevant papers lost to a confidence gate, junk posted instead.**
