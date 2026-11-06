@@ -236,11 +236,17 @@ file disables that feature and nothing else.
   `ARJEV_JEV_KEY_FILE`. Without it: lexical-only ranking, flagged in the `mode:` line.
 - **Slack** (optional attention layer). **HUMAN STEP** — creating the app needs
   their browser. Walk them through [slack-setup.md](slack-setup.md): create the
-  app from `docs/slack-app-manifest.yaml` (four scopes: `chat:write`,
-  `reactions:read`, `channels:history`, `channels:join`), save the token to
+  app from `docs/slack-app-manifest.yaml` (six scopes: `chat:write`,
+  `reactions:read`, `channels:history`, `channels:join`, `im:write`,
+  `im:history`), save the token to
   `~/.config/arjev/slack-token` (read through `ARJEV_SLACK_TOKEN_FILE`), and set
   `[slack] channel` (the channel **ID**), `keepers`, `who_style`, `why_style`.
   Never put a token in the config or a repo.
+- **A personal lane** (optional: picks by DM, ranked against one person's own
+  vault). Add a `[lanes.<name>]` table with `recipient` (their Slack member
+  ID), `roots`, and `feeds` — nothing falls through from the shared config
+  ([slack-setup.md](slack-setup.md#5-personal-lanes-picks-by-dm)). Gate:
+  `arjev inspect` prints the `lane <name> …` block and no `blocked: lane` line.
 
 **Check:** `ARJEV_JEV_KEY_FILE=~/.config/arjev/jev.key arjev digest` shows
 `mode: jev`. With Slack: `ARJEV_SLACK_TOKEN_FILE=~/.config/arjev/slack-token arjev slack sync`

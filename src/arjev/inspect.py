@@ -53,7 +53,36 @@ def run_inspect(cfg: Config, today: date | None = None) -> InspectReport:
         report.blocked.append(BLOCK_NO_ROOTS)
     if not fold.papers:
         report.blocked.append(BLOCK_NO_IDENTITY)
+    for name in cfg.lanes:
+        lines, blocked = _lane_lines(cfg, name, today)
+        report.lines += lines
+        report.blocked += blocked
     return report
+
+
+def _lane_lines(cfg: Config, name: str, today: date) -> tuple[list[str], list[str]]:
+    """One block per personal lane (issue #121): `lane <name> <key>: <value>`.
+    A lane blocks (naming itself) without a recipient, roots, or feeds — a lane
+    never inherits the shared slots, so each must be set on the lane."""
+    from .config import lane_config
+
+    lane = lane_config(cfg, name)
+    fold = fold_roots(lane.expanded_roots, lane)
+    directives = load_directives(lane)
+    terms = len(directives.all_terms())
+    lines = [
+        f"lane {name} recipient: {lane.slack_recipient or 'empty'}",
+        f"lane {name} roots: {', '.join(lane.roots) or 'empty'}",
+        f"lane {name} feeds: {', '.join(lane.feeds) or 'empty'}",
+        f"lane {name} top: {lane.top}",
+        f"lane {name} identity-bearing: {len(fold.papers)}",
+        f"lane {name} directives: " + (f"loaded ({terms} terms)" if directives.present else "none"),
+    ]
+    blocked = [f"blocked: lane {name}: no {slot} configured" for slot, ok in
+               (("recipient", lane.slack_recipient), ("roots", lane.roots), ("feeds", lane.feeds)) if not ok]
+    if lane.roots and not fold.papers:
+        blocked.append(f"blocked: lane {name}: zero identity-bearing notes")
+    return lines, blocked
 
 
 def _checklist_lines(cfg: Config) -> list[str]:

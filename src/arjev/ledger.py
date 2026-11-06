@@ -38,8 +38,10 @@ class Label:
 
 
 def ledger_path() -> Path:
+    from .lanes import scoped
+
     base = os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state"))
-    return Path(base) / "arjev" / "label-ledger.jsonl"
+    return scoped(Path(base) / "arjev") / "label-ledger.jsonl"
 
 
 class LabelLedger:

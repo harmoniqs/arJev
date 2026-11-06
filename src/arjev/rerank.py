@@ -74,8 +74,10 @@ class RunRecord:
 
 
 def state_dir() -> Path:
+    from .lanes import scoped
+
     base = os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state"))
-    return Path(base) / "arjev"
+    return scoped(Path(base) / "arjev")  # a lane's state lives in its own subdir (issue #121)
 
 
 def journal_path() -> Path:
