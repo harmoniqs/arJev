@@ -3,7 +3,10 @@
 All notable changes, newest first. Dates are release tags (UTC). Install a
 specific release with `uv tool install git+https://github.com/harmoniqs/arJev@vX.Y.Z`.
 
-## Unreleased
+## v0.7.0 — 2026-11-06
+
+**Personal lanes and the cited-by-me seed: picks for one person, by DM, ranked
+against what they read and cite.**
 
 - **Personal lanes: picks by DM, ranked against one person's vault** (#121).
   A `[lanes.<name>]` table names a recipient, their vault roots, and their
@@ -13,7 +16,10 @@ specific release with `uv tool install git+https://github.com/harmoniqs/arJev@vX
   keeps its own journal, posted ids, and label ledger, inherits no roots or
   feeds from the shared digest, and `arjev daily` runs every lane after the
   shared day. `arjev inspect` reports each lane and blocks one with no
-  recipient, roots, or feeds. `keep` and `staged` take `--lane` too.
+  recipient, roots, or feeds. Every verb that reads or writes state takes
+  `--lane` (`keep`, `staged`, `ingest`, `labels sync`, `review`,
+  `calibrate`), and on Sundays `arjev daily` sends each lane its own
+  week-in-review by DM.
 - The Slack app manifest gains `im:write` and `im:history` for lanes; an
   existing app needs the two scopes added and a reinstall.
 - **`arjev ingest --cited-by-me FILE`: seed the vault from what your own
@@ -27,6 +33,8 @@ specific release with `uv tool install git+https://github.com/harmoniqs/arJev@vX
   citations are listed in the output. `arjev inspect` reports the seed's
   share as `fold cited-by-me:`. Optional `ARJEV_S2_KEY_FILE` for a higher
   rate limit.
+- Fixed: the init-template test no longer fails when the checkout lives under
+  a directory named for the lab.
 - Seeded notes can now carry a DOI identity alone (a citation with no arXiv
   id), which the fold already treated as identity-bearing.
 

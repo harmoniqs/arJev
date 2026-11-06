@@ -56,7 +56,9 @@ def test_feeds_slot_is_empty_and_points_at_the_taxonomy(tmp_path):
 def test_no_lab_name_anywhere_in_the_template(tmp_path):
     """Field-neutral means field-neutral: the template presumes no lab, no schema
     owner — a researcher in any arXiv-served field reads it as theirs."""
-    content = write_config(tmp_path)
+    # the vault path is the caller's, not the template's: a checkout under a
+    # directory named for the lab must not fail this
+    content = write_config(tmp_path).replace(str(VAULT), "<vault>")
     assert "harmoniqs" not in content.lower(), "zero lab names in the template"
 
 

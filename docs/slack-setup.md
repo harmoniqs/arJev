@@ -114,8 +114,17 @@ arjev digest --lane jackson --post slack       # today's picks, by DM
 arjev slack sync --lane jackson                # DM reactions → that lane's labels
 ```
 
-`arjev daily` runs every lane after the shared digest, so nothing more is
-needed on the timer.
+Seed the lane's vault the same way as any other — every `ingest` source takes
+`--lane`, and the strongest start is what the person's own papers cite:
+
+```bash
+arjev ingest --lane jackson --cited-by-me ~/Downloads/mine.bib
+```
+
+`arjev daily` runs every lane after the shared digest, and on Sundays sends
+each lane its own week-in-review by DM (and writes its own calibration
+report), so nothing more is needed on the timer. `review`, `calibrate`,
+`labels sync`, `keep`, and `staged` all take `--lane`.
 
 ## What arJev posts, and what it reads
 

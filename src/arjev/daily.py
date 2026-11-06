@@ -10,7 +10,8 @@ deployment's shell glue:
 2. ingest — papers people shared in the digest channel become vault notes.
 3. slack sync — reactions and thread replies become labels; keeps become notes.
    Then each personal lane: its digest by DM (retried the same way) and its sync.
-4. Sundays — the calibration report (to the state dir) and the week-in-review.
+4. Sundays — the calibration report (to the state dir) and the week-in-review;
+   each lane gets its own, the review by DM.
 
 Steps 2–4 run only when a Slack token is available. A failed step is logged
 and the rest still run; the exit code is 1 if any step failed.
@@ -95,6 +96,15 @@ def run_daily(
         review = ["review", "--days", "7", *(["--post", "slack"] if slack_posting else []), *config_arg]
         if not _ok(runner, review, log, save_as=f"review-{now:%Y%m%d}.md"):
             failed.append("review")
+        # each lane gets its own calibration report and its week-in-review by DM
+        for name in cfg.lanes if slack else ():
+            log(f"lane {name} calibrate + review — by DM")
+            if not _ok(runner, ["calibrate", "--lane", name, *config_arg], log,
+                       save_as=f"calibration-{name}-{now:%Y%m%d}.md"):
+                failed.append(f"lane {name} calibrate")
+            if not _ok(runner, ["review", "--days", "7", "--lane", name, "--post", "slack", *config_arg], log,
+                       save_as=f"review-{name}-{now:%Y%m%d}.md"):
+                failed.append(f"lane {name} review")
 
     log("done" if not failed else f"done with failures: {', '.join(failed)}")
     return 1 if failed else 0

@@ -215,14 +215,16 @@ def review(days: int = 7, now: date | None = None) -> Review:
 def post_review(cfg: Config, report: Review, slack_client=None) -> str:
     """Post the rendered review to the configured channel — the digest/ingest
     client seam, so the posting path stays testable offline."""
-    if not cfg.slack_channel:
+    if not (cfg.slack_channel or cfg.slack_recipient):
         raise SystemExit("slack_channel not configured (docs/slack-setup.md)")
     if slack_client is None:
         from .digest import slack_token
         from .slack import SlackClient
 
         slack_client = SlackClient(token=slack_token())
-    return slack_client.post_message(cfg.slack_channel, report.render_slack())
+    # a lane's review goes to its recipient's DM (issue #121)
+    channel = slack_client.open_dm(cfg.slack_recipient) if cfg.slack_recipient else cfg.slack_channel
+    return slack_client.post_message(channel, report.render_slack())
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────

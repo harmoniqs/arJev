@@ -371,3 +371,74 @@ def test_daily_skips_lanes_without_a_slack_token():
               has_slack=False, retries=1)
     assert not [c for c in calls if "--lane" in c]
     assert any("lanes skipped" in line for line in lines)
+
+
+# ── the rest of the loop, per lane: review, calibrate, seeding ──────────────────
+
+def test_a_lane_review_reads_the_lane_journal_and_goes_to_the_dm(monkeypatch, tmp_path, capsys):
+    """The week-in-review is a lane's too: it re-reads only that lane's journal
+    and posts to the recipient's DM, never the shared channel."""
+    import arjev.slack as slack_mod
+
+    path = _config_file(tmp_path, _lane_vault(tmp_path))
+    lane = lane_config(load_config(path), "jackson")
+    run_digest(lane, feed_file=str(RSS), today=TODAY, seed="s", post="slack", slack_client=FakeSlack().client())
+    fake = FakeSlack()
+    monkeypatch.setenv("ARJEV_SLACK_TOKEN", "xoxb-test")
+    monkeypatch.setattr(slack_mod, "SlackClient", lambda **kw: fake.client())
+    assert main(["review", "--lane", "jackson", "--days", "36500", "--post", "slack", "--config", str(path)]) == 0
+    posts = fake.posts()
+    assert len(posts) == 1 and posts[0]["channel"] == DM
+    # the shared scope has no journal at all — the review read the lane's
+    assert not journal_path().exists()
+
+
+def test_post_review_opens_the_recipients_dm():
+    from arjev.review import Review, post_review
+
+    cfg = Config()
+    cfg.slack_recipient = RECIPIENT
+    fake = FakeSlack()
+    report = Review(days=7)
+    report.render_slack = lambda: "the week"  # the rendering is test_review's; this is the routing
+    post_review(cfg, report, slack_client=fake.client())
+    assert ("conversations.open", {"users": RECIPIENT}) in fake.calls
+    assert [p["channel"] for p in fake.posts()] == [DM]
+
+
+def test_calibrate_runs_in_the_lane_scope(tmp_path, capsys):
+    path = _config_file(tmp_path, _lane_vault(tmp_path))
+    lane = lane_config(load_config(path), "jackson")
+    run_digest(lane, feed_file=str(RSS), today=TODAY, seed="s", post="slack", slack_client=FakeSlack().client())
+    assert main(["calibrate", "--lane", "jackson", "--json", "--config", str(path)]) == 0
+    lane_report = json.loads(capsys.readouterr().out)
+    assert main(["calibrate", "--json", "--config", str(path)]) == 0
+    shared_report = json.loads(capsys.readouterr().out)
+    assert lane_report != shared_report, "the lane calibrates against its own journal"
+
+
+def test_ingest_lane_seeds_the_lane_vault_not_the_shared_one(tmp_path, capsys):
+    lane_vault = _lane_vault(tmp_path)
+    path = _config_file(tmp_path, lane_vault)
+    bib = tmp_path / "mine.bib"
+    bib.write_text("@article{a,\n  title = {A seeded lane paper},\n  eprint = {2601.07777},\n  year = {2026}\n}\n")
+    assert main(["ingest", "--lane", "jackson", "--bibtex", str(bib), "--config", str(path)]) == 0
+    assert list((tmp_path / "lane-papers").glob("*.md")), "the lane's papers_dir"
+    assert not (tmp_path / "shared-papers").exists()
+
+
+def test_daily_sunday_sends_each_lane_its_review():
+    from datetime import UTC, datetime
+
+    from arjev.config import Lane
+    from arjev.daily import run_daily
+
+    calls = []
+    cfg = Config()
+    cfg.slack_channel = "C0000000SYN"
+    cfg.lanes = {"jackson": Lane(name="jackson", recipient=RECIPIENT)}
+    run_daily(lambda argv: calls.append(argv) or 0, cfg, config_arg=[],
+              now=datetime(2026, 10, 25, 13, tzinfo=UTC), sleep=lambda s: None, log=lambda line: None,
+              has_slack=True, retries=1)
+    assert ["calibrate", "--lane", "jackson"] in calls
+    assert ["review", "--days", "7", "--lane", "jackson", "--post", "slack"] in calls

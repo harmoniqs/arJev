@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     p_labels_sub = p_labels.add_subparsers(dest="labels_cmd", required=True)
     p_labels_sync = p_labels_sub.add_parser("sync", help="vault-arrival join + checkbox harvest")
     p_labels_sync.add_argument("--config", default=None)
+    p_labels_sync.add_argument("--lane", default=None, help=LANE_HELP)
 
     p_slack = sub.add_parser("slack", help="Slack surface operations")
     p_slack_sub = p_slack.add_subparsers(dest="slack_cmd", required=True)
@@ -92,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         help="fetch real titles for placeholder-titled seed notes (explicit human-invoked repair)",
     )
     p_ingest.add_argument("--config", default=None)
+    p_ingest.add_argument("--lane", default=None, help=LANE_HELP)
 
     p_rate = sub.add_parser("rate", help="advisory ratings: Jev proposes, you accept")
     p_rate_sub = p_rate.add_subparsers(dest="rate_cmd", required=True)
@@ -104,6 +106,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_cal = sub.add_parser("calibrate", help="replay joins → Brier, reliability, precision@5, probe lift")
     p_cal.add_argument("--config", default=None)
+    p_cal.add_argument("--lane", default=None, help=LANE_HELP)
     p_cal.add_argument("--runs", type=int, default=30, help="journal window (last N runs)")
     p_cal.add_argument(
         "--replay-arms",
@@ -125,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     p_review.add_argument("--days", type=int, default=7, help="window in days (default: 7)")
     p_review.add_argument("--post", default="stdout", choices=["stdout", "slack"], help="output sink")
     p_review.add_argument("--config", default=None)
+    p_review.add_argument("--lane", default=None, help=LANE_HELP)
 
     args = parser.parse_args(argv)
     from .lanes import lane_scope
@@ -195,10 +199,9 @@ def _dispatch(parser, args) -> int:
         print(f"kept {args.arxiv}: stub at {path} (staged — fill rating/why to give it taste)")
         return 0
     if args.cmd == "fetch":
-        from arjev.config import load_config
         from arjev.keep import fetch_pdf
 
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        cfg = _load(args)
         if not cfg.library_dir:
             print("library_dir not configured", file=sys.stderr)
             return 1
@@ -206,10 +209,9 @@ def _dispatch(parser, args) -> int:
         print(f"fetched: {path}")
         return 0
     if args.cmd == "backfill":
-        from arjev.config import load_config
         from arjev.paper_content import backfill_corpus
 
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        cfg = _load(args)
         result = backfill_corpus(cfg, pace_s=args.pace_s)
         print(
             f"corpus: {result['n_corpus']} notes · abstracts stamped {result['abstracts_stamped']} · "
@@ -229,10 +231,9 @@ def _dispatch(parser, args) -> int:
             print(line)
         return 0
     if args.cmd == "inspect":
-        from .config import load_config
         from .inspect import run_inspect
 
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        cfg = _load(args)
         report = run_inspect(cfg)
         for line in report.lines:
             print(line)
@@ -242,12 +243,11 @@ def _dispatch(parser, args) -> int:
     if args.cmd == "labels" and args.labels_cmd == "sync":
         from datetime import datetime
 
-        from arjev.config import load_config
         from arjev.fold import fold_roots
         from arjev.labels import labels_sync
         from arjev.ledger import LabelLedger
 
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        cfg = _load(args)
         ledger = LabelLedger()
         new = labels_sync(cfg, fold_roots(cfg.expanded_roots, cfg), ledger, now=datetime.now())
         print(f"{len(new)} new label rows; ledger holds {len(ledger.rows())}")
@@ -255,10 +255,9 @@ def _dispatch(parser, args) -> int:
     if args.cmd == "ingest":
         from datetime import date
 
-        from arjev.config import load_config
         from arjev.ingest import ingest_bibtex, ingest_pdf_dir, ingest_slack_channel
 
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        cfg = _load(args)
         papers_dir = Path(args.papers_dir).expanduser() if args.papers_dir else None
         today = date.today()
         total = 0
@@ -308,14 +307,13 @@ def _dispatch(parser, args) -> int:
     if args.cmd == "rate" and args.rate_cmd == "propose":
         from datetime import date
 
-        from arjev.config import load_config
         from arjev.fold import fold_roots
         from arjev.jev import JevClient, JevReceipt
         from arjev.profile import build_profile
         from arjev.rate import propose_ratings
         from arjev.rerank import run_id_for, write_run_receipts
 
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        cfg = _load(args)
         fold = fold_roots(cfg.expanded_roots, cfg)
         profile = build_profile(fold, cfg, date.today())
         client = JevClient(key=None, min_confidence=0.0)  # proposals accept any top level
@@ -330,11 +328,10 @@ def _dispatch(parser, args) -> int:
         print("review with: arjev rate accept <arxiv> <core|useful|marginal>")
         return 0
     if args.cmd == "rate" and args.rate_cmd == "accept":
-        from arjev.config import load_config
         from arjev.fold import fold_roots
         from arjev.rate import accept_rating
 
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        cfg = _load(args)
         fold = fold_roots(cfg.expanded_roots, cfg)
         from arjev.fold import normalize_arxiv
 
@@ -348,10 +345,9 @@ def _dispatch(parser, args) -> int:
         return 0
     if args.cmd == "calibrate":
         from arjev.calibrate import calibrate, calibrate_arms
-        from arjev.config import load_config
         from arjev.fold import fold_roots
 
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        cfg = _load(args)
         fold = fold_roots(cfg.expanded_roots, cfg)
         if args.replay_arms:
             from arjev.ingest import fetch_metadata
@@ -365,17 +361,15 @@ def _dispatch(parser, args) -> int:
         print(json.dumps(dataclasses.asdict(report), indent=2, sort_keys=True) if args.json else report.render())
         return 0
     if args.cmd == "daily":
-        from .config import load_config
         from .daily import run_daily
 
         config_arg = ["--config", args.config] if args.config else []
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        cfg = _load(args)
         return run_daily(main, cfg, config_arg=config_arg, retries=args.retries, backoff_s=args.backoff_min * 60)
     if args.cmd == "review":
-        from arjev.config import load_config
         from arjev.review import post_review, review
 
-        cfg = load_config(Path(args.config).expanduser() if args.config else None)
+        cfg = _load(args)
         try:
             report = review(days=args.days)
         except (FileNotFoundError, ValueError) as exc:
