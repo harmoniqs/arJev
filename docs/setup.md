@@ -78,7 +78,19 @@ existing papers are skipped, and existing notes are never edited.
 arjev ingest --bibtex ~/Downloads/library.bib     # a Google Scholar or Zotero export
 arjev ingest --pdf-dir ~/Papers                   # a folder of PDFs
 arjev ingest --slack-channel-id C0123456ABC       # links people shared in Slack (needs step 8)
+arjev ingest --cited-by-me ~/Downloads/mine.bib   # everything YOUR papers cite (see below)
 ```
+
+**What your own papers cite** is the strongest record of what you read. In
+Google Scholar, open **My profile**, tick your papers, click **Export** →
+**BibTeX**, and pass that file to `--cited-by-me`. arJev looks up each paper's
+reference list on [Semantic Scholar](https://www.semanticscholar.org/product/api)
+(free, no account; about one request per second) and seeds one note per cited
+work that has an arXiv id or DOI, its `why:` naming the paper of yours that
+cites it. Your own papers are seeded too, marked `seed: authored`. A paper it
+cannot find, or a citation without an identifier, is listed in the output —
+nothing is dropped silently. An optional Semantic Scholar API key raises the
+rate limit: save it to a mode-600 file and point `ARJEV_S2_KEY_FILE` at it.
 
 **Check:** `arjev inspect` exits 0, and its `fold identity-bearing:` line counts
 your papers. It prints `blocked: …` and exits 1 if something is missing.

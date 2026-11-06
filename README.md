@@ -56,7 +56,8 @@ arjev digest                                 # today's picks, printed
 ```
 
 No paper notes yet? Seed the vault from a Zotero or Google Scholar export with
-`arjev ingest --bibtex library.bib`, or from a folder of PDFs.
+`arjev ingest --bibtex library.bib`, or from a folder of PDFs — or from what
+your own papers cite, with `arjev ingest --cited-by-me mine.bib`.
 
 **Full setup** — your existing notes, a Jev key, Slack, and a daily
 schedule — is in **[docs/setup.md](docs/setup.md)**, about fifteen minutes.
@@ -85,7 +86,7 @@ week-in-review of good papers that missed a daily top 5.
 | `arjev inspect` | shows what the config sees; exits 1 if setup is incomplete |
 | `arjev digest` | ranks today's papers; `--post vault`, `--post slack`, or `--post slack,vault` to deliver |
 | `arjev daily` | the whole day, for a timer |
-| `arjev ingest --bibtex FILE` | seeds the vault (also `--pdf-dir`, `--slack-channel-id`) |
+| `arjev ingest --bibtex FILE` | seeds the vault (also `--pdf-dir`, `--slack-channel-id`, `--cited-by-me`) |
 | `arjev keep ARXIV_ID` | keeps a paper from a digest as a vault note |
 | `arjev staged` | lists kept notes still waiting for a write-up |
 | `arjev fetch ARXIV_ID` | downloads a paper's PDF into your library |

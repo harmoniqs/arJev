@@ -219,7 +219,16 @@ Any combination, all idempotent, all provenance-stamped:
 arjev ingest --bibtex ~/Downloads/library.bib
 arjev ingest --pdf-dir ~/Papers
 arjev ingest --slack-channel-id C0123456ABC --limit 200
+arjev ingest --cited-by-me ~/Downloads/mine.bib
 ```
+
+`--cited-by-me` takes a BibTeX export of **the researcher's own papers**
+(**HUMAN STEP** — Google Scholar → My profile → select → Export → BibTeX) and
+seeds every work those papers cite, via Semantic Scholar reference lists. Its
+summary lines report own papers it could not resolve (an exact title match is
+required — near misses are rejected) and cited works without an identifier;
+read them back to the human. `arjev inspect` then shows
+`fold cited-by-me: <n> (<a> authored, <c> cited)`.
 
 **Check:** the printed counts match reality; seeded notes appear in the vault's
 `papers/` dir with `why:` provenance lines. Re-running changes nothing. Then

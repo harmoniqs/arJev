@@ -128,6 +128,10 @@ def _fold_lines(fold: FoldResult, profile: Profile, staged: int, directives: Dir
         f"fold taste-cards: {len(profile.cards)}",
         f"fold staged: {staged}",
     ]
+    seeded = [p.seed for p in fold.papers if p.seed in ("authored", "cited")]
+    if seeded:  # the cited-by-me seed's share of the corpus (issue #122)
+        lines.append(f"fold cited-by-me: {len(seeded)} ({seeded.count('authored')} authored, "
+                     f"{seeded.count('cited')} cited)")
     if directives.present:
         lines.append(f"fold directives: loaded ({len(directives.all_terms())} terms)")
     else:

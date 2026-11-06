@@ -38,6 +38,10 @@ before. No implementation detail lives here.
   posted ids, and labels. A lane's picks arrive as Slack DMs; only its
   recipient's reactions label it, and it inherits no roots or feeds from the
   shared digest.
+- **cited-by-me** — The seed that reads a researcher's own papers' reference
+  lists: every cited work with an arXiv id or DOI becomes a staged note whose
+  why is the citation itself; the researcher's own papers are seeded as
+  authored.
 - **who-line** — The pick message's author-and-attribution line: authors as
   the feed reports them, affiliations as the paper's own PDF prints them,
   tracked-people matches highlighted. Never an inferred group — attribution

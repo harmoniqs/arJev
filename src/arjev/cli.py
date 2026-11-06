@@ -77,6 +77,11 @@ def main(argv: list[str] | None = None) -> int:
     p_ingest = sub.add_parser("ingest", help="seed the taste profile: BibTeX, a PDF folder, or a Slack channel")
     p_ingest.add_argument("--bibtex", default=None, help="path to a .bib export (Google Scholar / Zotero)")
     p_ingest.add_argument("--pdf-dir", default=None, help="folder of papers (ids from filenames/stamps)")
+    p_ingest.add_argument(
+        "--cited-by-me",
+        default=None,
+        help="a .bib export of YOUR OWN papers — seed every work they cite (Semantic Scholar reference lists)",
+    )
     p_ingest.add_argument("--slack-channel", default=None, help="channel name — harvest human-shared arXiv links")
     p_ingest.add_argument("--slack-channel-id", default=None, help="channel id (when the name is not in the config)")
     p_ingest.add_argument("--limit", type=int, default=200, help="Slack history window")
@@ -271,6 +276,14 @@ def _dispatch(parser, args) -> int:
             hits = ingest_pdf_dir(Path(args.pdf_dir).expanduser(), cfg, today, papers_dir)
             print(f"pdf-dir: {len(hits)} papers seeded from {args.pdf_dir}")
             total += len(hits)
+        if args.cited_by_me:
+            from arjev import cited
+
+            report = cited.ingest_cited_by_me(Path(args.cited_by_me).expanduser(), cfg, today, papers_dir,
+                                              client=cited.S2Client(key=cited.s2_key()))
+            for line in report.summary_lines():
+                print(line)
+            total += report.cited_seeded + report.authored_seeded
         if args.slack_channel or args.slack_channel_id:
             from arjev.digest import slack_token
             from arjev.slack import SlackClient
