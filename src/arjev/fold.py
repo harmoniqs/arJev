@@ -45,6 +45,7 @@ class PaperNote:
     basename: str  # filename without .md — the wikilink target
     touched: bool  # human filled why or set rating (the staged gate's trigger)
     inlinks: int = 0
+    seed: str | None = None  # which seed wrote the note, when one did (cited-by-me: authored | cited)
 
     @property
     def contributes_taste(self) -> bool:
@@ -158,6 +159,7 @@ def _build_paper(
         body=body,
         basename=path.stem,
         touched=why is not None or rating is not None,
+        seed=fm["seed"].strip() if isinstance(fm.get("seed"), str) and fm["seed"].strip() else None,
     )
 
 

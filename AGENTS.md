@@ -32,7 +32,7 @@ Both must pass before a merge.
 | `src/arjev/score.py` · `rank.py` · `rerank.py` · `jev.py` | lexical scoring, ranking, the Jev layer, and the digest journal |
 | `src/arjev/digest.py` · `render.py` | one digest run and its sinks (stdout, vault note, Slack) |
 | `src/arjev/affil.py` | the who-line: affiliations parsed from a paper's own PDF |
-| `src/arjev/slack.py` · `ingest.py` | the Slack client, pick rendering, reaction harvest; seeding from BibTeX/PDFs/Slack |
+| `src/arjev/slack.py` · `ingest.py` · `cited.py` | the Slack client, pick rendering, reaction harvest; seeding from BibTeX/PDFs/Slack; the cited-by-me seed (Semantic Scholar reference lists) |
 | `src/arjev/keep.py` · `labels.py` · `ledger.py` · `state.py` | keeps, the label ledger, posted ids |
 | `src/arjev/paper_content.py` | PDF text extraction and the library |
 | `src/arjev/calibrate.py` · `review.py` · `rate.py` | calibration, the week-in-review, rating proposals |
@@ -103,5 +103,9 @@ Lessons from live runs that the tests now pin:
 - Slack's read methods (`reactions.get`, `conversations.replies`) **ignore JSON
   bodies**; every call is form-encoded (`slack.py`).
 - Slack needs a channel **ID**, not a name, for history and ingest.
+- Semantic Scholar's reference lists carry `externalIds` (ArXiv, DOI) per cited
+  work; OpenAlex returns empty `referenced_works` for arXiv preprints. Google
+  Scholar exports rarely carry a DOI and put arXiv ids in `journal`
+  (`cited.py` reads both, and falls back to an exact title match).
 - No external index (arXiv API, Semantic Scholar, INSPIRE, OpenAlex) carries
   affiliations on publication day; the paper's PDF is the only source.

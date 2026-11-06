@@ -16,6 +16,19 @@ specific release with `uv tool install git+https://github.com/harmoniqs/arJev@vX
   recipient, roots, or feeds. `keep` and `staged` take `--lane` too.
 - The Slack app manifest gains `im:write` and `im:history` for lanes; an
   existing app needs the two scopes added and a reinstall.
+- **`arjev ingest --cited-by-me FILE`: seed the vault from what your own
+  papers cite** (#122). Give it a BibTeX export of your papers (Google Scholar
+  → My profile → Export → BibTeX). It reads each paper's reference list from
+  the Semantic Scholar API and seeds one staged note per cited work with an
+  arXiv id or DOI, its `why:` naming the citing paper(s); your own papers are
+  seeded too (`seed: authored`). Papers without an id in the export resolve
+  by exact title match only. Re-runs change nothing, works already in any
+  vault root are skipped, and unresolved papers and identifier-less
+  citations are listed in the output. `arjev inspect` reports the seed's
+  share as `fold cited-by-me:`. Optional `ARJEV_S2_KEY_FILE` for a higher
+  rate limit.
+- Seeded notes can now carry a DOI identity alone (a citation with no arXiv
+  id), which the fold already treated as identity-bearing.
 
 ## v0.6.1 — 2026-10-26
 
